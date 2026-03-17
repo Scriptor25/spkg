@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,164 +13,18 @@
 
 #include <json.hxx>
 
-enum class file_reference_type
-{
-    file,
-    manifest,
-};
-
-struct file_reference_t
-{
-    file_reference_type type{};
-    std::string path;
-};
-
-struct command_step_t
-{
-    std::string dir;
-    std::string file;
-    std::vector<std::string> args;
-    std::map<std::string, std::string> env;
-};
-
-using command_list_t = std::vector<command_step_t>;
-
-struct fragment_t
-{
-    std::string name;
-    std::string description;
-    
-    std::string dir;
-    std::map<std::string, std::string> env;
-    
-    command_list_t configure;
-    command_list_t build;
-    command_list_t install;
-
-    std::vector<std::string> cache;
-    std::vector<file_reference_t> files;
-};
-
-struct package_t
-{
-    std::string id;
-    std::string version;
-
-    std::string name;
-    std::string description;
-    
-    std::map<std::string, std::string> env;
-
-    command_list_t setup;
-    std::vector<std::string> cache;
-
-    fragment_t main;
-    std::map<std::string, fragment_t> fragments;
-};
-
-struct config_t
-{
-    std::vector<std::filesystem::path> packages;
-    std::filesystem::path cache;
-
-    std::map<std::string, std::vector<std::string>> installed;
-};
-
-struct specifier_t
-{
-    specifier_t() = default;
-
-    explicit specifier_t(const std::string_view s)
-    {
-        const auto fragment_begin = s.find_last_of('/');
-        const auto version_begin = s.find_last_of(':');
-
-        const auto id_length = fragment_begin == std::string_view::npos
-                                   ? version_begin == std::string_view::npos
-                                         ? std::string_view::npos
-                                         : version_begin
-                                   : fragment_begin;
-        id = s.substr(0, id_length);
-
-        if (fragment_begin != std::string_view::npos)
-        {
-            const auto fragment_length = version_begin == std::string_view::npos
-                                             ? std::string_view::npos
-                                             : version_begin - fragment_begin - 1;
-            fragment = s.substr(fragment_begin + 1, fragment_length);
-        }
-
-        if (version_begin != std::string_view::npos)
-            version = s.substr(version_begin + 1);
-    }
-
-    std::string_view id;
-    std::string_view fragment;
-    std::string_view version;
-};
-
-std::ostream &operator<<(std::ostream &stream, const command_step_t &step)
-{
-    if (!step.dir.empty())
-        stream << "[" << step.dir << "] ";
-    for (auto &[key, val] : step.env)
-        stream << key << "=" << val << " ";
-    stream << step.file;
-    for (auto &arg : step.args)
-        stream << " '" << arg << "'";
-    return stream;
-}
-
-template<>
-struct std::formatter<command_step_t> : std::formatter<std::string>
-{
-    template<typename C>
-    auto format(const command_step_t &step, C &context) const
-    {
-        std::string str;
-        if (!step.dir.empty())
-            str += "[" + step.dir + "] ";
-        for (auto &[key, val] : step.env)
-            str += key + "=" + val + " ";
-        str += step.file;
-        for (auto &arg : step.args)
-            str += " '" + arg + "'";
-
-        return std::formatter<std::string>::format(str, context);
-    }
-};
-
-template<typename... A>
-auto log_warning(std::format_string<A...> &&format, A &&... args)
-{
-    std::cerr << "Warning: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...) << std::endl;
-}
-
-template<typename... A>
-auto log_error(std::format_string<A...> &&format, A &&... args)
-{
-    std::cerr << "Error: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...) << std::endl;
-    return 1;
-}
+template<typename T>
+bool get_opt(const json::Node &node, T &value, T default_value = {});
 
 template<typename T>
-bool get_opt(const json::Node &node, T &value, T default_value = {})
-{
-    if (std::optional<T> opt; node >> opt)
-    {
-        value = std::move(opt.value_or(std::move(default_value)));
-        return true;
-    }
-    
-    return false;
-}
+bool from_json(const json::Node &node, std::set<T> &value);
 
 template<>
 bool from_json(const json::Node &node, command_step_t &value)
 {
     if (std::string file; node >> file)
     {
-        value = { .file = std::move(file) };
+        value = { .command = { std::move(file) } };
         return true;
     }
 
@@ -180,9 +35,9 @@ bool from_json(const json::Node &node, command_step_t &value)
 
     auto ok = true;
 
-    ok &= object_node["file"] >> value.file;
+    ok &= object_node["command"] >> value.command;
+
     ok &= get_opt(object_node["dir"], value.dir);
-    ok &= get_opt(object_node["args"], value.args);
     ok &= get_opt(object_node["env"], value.env);
 
     return ok;
@@ -386,6 +241,30 @@ void to_json(json::Node &node, const config_t &value)
     node = std::move(object_node);
 }
 
+template<typename T>
+bool from_json(const json::Node &node, std::set<T> &value)
+{
+    if (std::vector<T> v; node >> v)
+    {
+        value = { v.begin(), v.end() };
+        return true;
+    }
+
+    return false;
+}
+
+template<typename T>
+bool get_opt(const json::Node &node, T &value, T default_value)
+{
+    if (std::optional<T> opt; node >> opt)
+    {
+        value = std::move(opt.value_or(std::move(default_value)));
+        return true;
+    }
+    
+    return false;
+}
+
 static config_t get_config()
 {
     if (std::ifstream stream(get_config_path() / "config.json"); stream) {
@@ -427,14 +306,28 @@ static int set_config(const config_t &value)
 
 static std::vector<std::string> read_manifest(const std::filesystem::path &path)
 {
+    if (!std::filesystem::exists(path))
+    {
+        log_warning("manifest path '{}' does not exist", path.string());
+        return {};
+    }
+    
+    if (std::filesystem::is_directory(path))
+    {
+        log_warning("manifest path '{}' is a directory", path.string());
+        return {};
+    }
+
     std::ifstream stream(path);
     if (!stream)
+    {
+        log_warning("failed to open manifest file '{}'", path.string());
         return {};
+    }
 
     std::vector<std::string> manifest;
     for (std::string line; std::getline(stream, line);)
         manifest.push_back(std::move(line));
-
     return manifest;
 }
 
@@ -567,15 +460,11 @@ static int exec(
     const command_step_t &step,
     const std::filesystem::path &work_dir)
 {
-    std::vector<std::string> args;
-    args.push_back(step.file);
-    args.insert(args.end(), step.args.begin(), step.args.end());
-
     std::map<std::string, std::string> envs;
     envs.insert(package.env.begin(), package.env.end());
     envs.insert(step.env.begin(), step.env.end());
 
-    return exec(work_dir / step.dir, step.file, args, envs);
+    return exec(work_dir / step.dir, step.command[0], step.command, envs);
 }
 
 static int exec(
@@ -584,16 +473,12 @@ static int exec(
     const command_step_t &step,
     const std::filesystem::path &work_dir)
 {
-    std::vector<std::string> args;
-    args.push_back(step.file);
-    args.insert(args.end(), step.args.begin(), step.args.end());
-
     std::map<std::string, std::string> envs;
     envs.insert(package.env.begin(), package.env.end());
     envs.insert(fragment.env.begin(), fragment.env.end());
     envs.insert(step.env.begin(), step.env.end());
 
-    return exec(work_dir / fragment.dir / step.dir, step.file, args, envs);
+    return exec(work_dir / fragment.dir / step.dir, step.command[0], step.command, envs);
 }
 
 static int install(config_t &config, const std::string_view arg)
@@ -617,7 +502,12 @@ static int install(config_t &config, const std::string_view arg)
 
             json::Node node;
             stream >> node;
-            node >> package;
+
+            if (!(node >> package))
+            {
+                log_warning("invalid package json in file '{}'", entry.path().string());
+                continue;
+            }
 
             found = package.id == specifier.id
                     && (specifier.version.empty() || package.version == specifier.version);
@@ -629,16 +519,18 @@ static int install(config_t &config, const std::string_view arg)
     if (!found)
         return log_error("no package '{}:{}'", specifier.id, specifier.version);
 
-    fragment_t fragment;
+    const fragment_t *fragment_ptr;
     if (specifier.fragment.empty())
-        fragment = package.main;
+        fragment_ptr = &package.main;
     else
     {
         if (!package.fragments.contains(std::string(specifier.fragment)))
             return log_error("no fragment '{}' in package '{}:{}'", specifier.fragment, specifier.id, specifier.version);
 
-        fragment = package.fragments.at(std::string(specifier.fragment));
+        fragment_ptr = &package.fragments.at(std::string(specifier.fragment));
     }
+
+    auto &fragment = *fragment_ptr;
 
     auto cache_key = package.id
                      + (specifier.fragment.empty() ? "" : '-' + std::string(specifier.fragment))
@@ -708,25 +600,23 @@ static int install(config_t &config, const std::string_view arg)
             return log_error("install step '{}' exited with non-zero code {}", step, code);
         }
 
-    std::vector<std::string> installed;
+    auto &installed = config.installed[cache_key];
     for (auto &[type, path] : fragment.files)
     {
         switch (type)
         {
         case file_reference_type::file:
-            installed.push_back(path);
+            installed.insert(path);
             break;
         case file_reference_type::manifest:
         {
-            auto manifest = read_manifest(path);
+            auto manifest = read_manifest(work_dir / fragment.dir / path);
             for (auto &entry : manifest)
-                installed.push_back(std::move(entry));
+                installed.insert(std::move(entry));
             break;
         }
         }
     }
-
-    config.installed[cache_key] = std::move(installed);
 
     std::filesystem::remove_all(work_dir);
     return 0;
