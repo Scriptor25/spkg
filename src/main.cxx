@@ -142,13 +142,13 @@ struct std::formatter<command_step_t> : std::formatter<std::string>
 template<typename... A>
 auto log_warning(std::format_string<A...> &&format, A &&... args)
 {
-    std::cerr << "Warning: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...);
+    std::cerr << "Warning: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...) << std::endl;
 }
 
 template<typename... A>
 auto log_error(std::format_string<A...> &&format, A &&... args)
 {
-    std::cerr << "Error: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...);
+    std::cerr << "Error: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...) << std::endl;
     return 1;
 }
 
