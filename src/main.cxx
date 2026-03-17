@@ -1,6 +1,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <unistd.h>
 #include <sys/wait.h>
@@ -19,16 +23,29 @@ struct file_reference_t
     std::string path;
 };
 
+struct command_step_t
+{
+    std::string dir;
+    std::string file;
+    std::vector<std::string> args;
+    std::map<std::string, std::string> env;
+};
+
+using command_list_t = std::vector<command_step_t>;
+
 struct fragment_t
 {
     std::string name;
     std::string description;
-    std::map<std::string, std::string> env;
+    
     std::string dir;
+    std::map<std::string, std::string> env;
+    
+    command_list_t configure;
+    command_list_t build;
+    command_list_t install;
+
     std::vector<std::string> cache;
-    std::vector<std::string> configure;
-    std::vector<std::string> build;
-    std::vector<std::string> install;
     std::vector<file_reference_t> files;
 };
 
@@ -36,11 +53,15 @@ struct package_t
 {
     std::string id;
     std::string version;
+
     std::string name;
     std::string description;
+    
     std::map<std::string, std::string> env;
-    std::vector<std::string> setup;
+
+    command_list_t setup;
     std::vector<std::string> cache;
+
     fragment_t main;
     std::map<std::string, fragment_t> fragments;
 };
@@ -86,153 +107,158 @@ struct specifier_t
     std::string_view version;
 };
 
-bool CommandListFromJson(const spkg::json::JsonNode &node, std::vector<std::string> &value)
+std::ostream &operator<<(std::ostream &stream, const command_step_t &step)
 {
-    if (spkg::json::IsUndefined(node))
-        return true;
+    if (!step.dir.empty())
+        stream << "[" << step.dir << "] ";
+    for (auto &[key, val] : step.env)
+        stream << key << "=" << val << " ";
+    stream << step.file;
+    for (auto &arg : step.args)
+        stream << " '" << arg << "'";
+    return stream;
+}
 
-    if (spkg::json::IsString(node))
-    {
-        auto &string_node = spkg::json::AsString(node);
-        value.push_back(string_node);
-        return true;
-    }
-
-    if (spkg::json::IsArray(node))
-    {
-        auto &array_node = spkg::json::AsArray(node);
-
-        for (auto &element : array_node)
-        {
-            if (spkg::json::IsString(element))
-            {
-                auto &string_node = spkg::json::AsString(element);
-                value.push_back(string_node);
-                continue;
-            }
-
-            auto segments = spkg::json::As<std::vector<std::string>>(element);
-
-            std::string line;
-            for (auto it = segments.begin(); it != segments.end(); ++it)
-            {
-                if (it != segments.begin())
-                    line += ' ';
-                line += *it;
-            }
-
-            value.push_back(std::move(line));
-        }
-
-        return true;
-    }
-
-    return false;
+template<typename T>
+bool get_opt(const json::Node &node, T &value, T default_value = {})
+{
+    std::optional<T> opt;
+    if (!(node >> opt))
+        return false;
+    value = std::move(opt.value_or(std::move(default_value)));
+    return true;
 }
 
 template<>
-bool FromJson(const spkg::json::JsonNode &node, file_reference_t &value)
+bool from_json(const json::Node &node, command_step_t &value)
 {
-    if (spkg::json::IsString(node))
+    if (std::string file; node >> file)
+    {
+        value = { .file = std::move(file) };
+        return true;
+    }
+
+    if (!json::IsObject(node))
+        return false;
+
+    auto &object_node = json::AsObject(node);
+
+    auto ok = true;
+
+    ok &= object_node["file"] >> value.file;
+    ok &= get_opt(object_node["dir"], value.dir);
+    ok &= get_opt(object_node["args"], value.args);
+    ok &= get_opt(object_node["env"], value.env);
+
+    return ok;
+}
+
+template<>
+bool from_json(const json::Node &node, command_list_t &value)
+{
+    if (json::IsUndefined(node))
+    {
+        value.clear();
+        return true;
+    }
+
+    if (command_step_t s; node >> s)
+    {
+        value.push_back(std::move(s));
+        return true;
+    }
+
+    if (!json::IsArray(node))
+        return false;
+    
+    auto &array_node = json::AsArray(node);
+    value.reserve(array_node.size());
+
+    auto ok = true;
+
+    for (auto &element : array_node)
+    {
+        command_step_t s;
+        auto p = element >> s;
+        if (p)
+            value.push_back(std::move(s));
+
+        ok &= p;
+    }
+
+    return ok;
+}
+
+template<>
+bool from_json(const json::Node &node, file_reference_t &value)
+{
+    if (std::string path; node >> path)
     {
         value = {
             .type = file_reference_type::file,
-            .path = spkg::json::AsString(node),
+            .path = std::move(path),
         };
         return true;
     }
 
-    if (!spkg::json::IsObject(node))
+    if (!json::IsObject(node))
         return false;
 
-    auto &object_node = spkg::json::AsObject(node);
+    auto &object_node = json::AsObject(node);
 
-    const auto type_node = object_node["type"];
-    const auto path_node = object_node["path"];
+    auto ok = true;
 
-    const auto type_string = spkg::json::As<std::string>(type_node);
-    if (type_string == "file")
-        value.type = file_reference_type::file;
-    else if (type_string == "manifest")
-        value.type = file_reference_type::manifest;
-    else
-        return false;
+    ok &= object_node["type"] >> value.type;
+    ok &= object_node["path"] >> value.path;
 
-    value.path = spkg::json::As<std::string>(path_node);
-
-    return true;
+    return ok;
 }
 
 template<>
-bool FromJson(const spkg::json::JsonNode &node, fragment_t &value)
+bool from_json(const json::Node &node, fragment_t &value)
 {
-    if (!spkg::json::IsObject(node))
+    if (!json::IsObject(node))
         return false;
 
-    auto &object_node = spkg::json::AsObject(node);
+    auto &object_node = json::AsObject(node);
 
-    const auto name_node = object_node["name"];
-    const auto description_node = object_node["description"];
-    const auto env_node = object_node["env"];
-    const auto dir_node = object_node["dir"];
-    const auto cache_node = object_node["cache"];
-    const auto configure_node = object_node["configure"];
-    const auto build_node = object_node["build"];
-    const auto install_node = object_node["install"];
-    const auto files_node = object_node["files"];
+    auto ok = true;
 
-    value.name = spkg::json::As<std::optional<std::string>>(name_node).value_or({});
-    value.description = spkg::json::As<std::optional<std::string>>(description_node).value_or({});
-    value.env = spkg::json::As<std::optional<std::map<std::string, std::string>>>(env_node).value_or({});
-    value.dir = spkg::json::As<std::optional<std::string>>(dir_node).value_or({});
+    ok &= get_opt(object_node["name"], value.name);
+    ok &= get_opt(object_node["description"], value.description);
+    ok &= get_opt(object_node["env"], value.env);
+    ok &= get_opt(object_node["dir"], value.dir);
+    ok &= get_opt(object_node["cache"], value.cache);
+    ok &= get_opt(object_node["configure"], value.configure);
+    ok &= get_opt(object_node["build"], value.build);
+    ok &= get_opt(object_node["install"], value.install);
+    ok &= get_opt(object_node["files"], value.files);
 
-    value.cache = spkg::json::As<std::optional<std::vector<std::string>>>(cache_node).value_or({});
-
-    if (!CommandListFromJson(configure_node, value.configure))
-        return false;
-    if (!CommandListFromJson(build_node, value.build))
-        return false;
-    if (!CommandListFromJson(install_node, value.install))
-        return false;
-
-    value.files = spkg::json::As<std::optional<std::vector<file_reference_t>>>(files_node).value_or({});
-
-    return true;
+    return ok;
 }
 
 template<>
-bool FromJson(const spkg::json::JsonNode &node, package_t &value)
+bool from_json(const json::Node &node, package_t &value)
 {
-    if (!spkg::json::IsObject(node))
+    if (!json::IsObject(node))
         return false;
 
-    auto &object_node = spkg::json::AsObject(node);
+    auto &object_node = json::AsObject(node);
 
-    const auto id_node = object_node["id"];
-    const auto version_node = object_node["version"];
-    const auto name_node = object_node["name"];
-    const auto description_node = object_node["description"];
-    const auto env_node = object_node["env"];
-    const auto setup_node = object_node["setup"];
-    const auto cache_node = object_node["cache"];
-    const auto main_node = object_node["main"];
-    const auto fragments_node = object_node["fragments"];
+    auto ok = true;
 
-    value.id = spkg::json::As<std::string>(id_node);
-    value.version = spkg::json::As<std::string>(version_node);
-    value.name = spkg::json::As<std::optional<std::string>>(name_node).value_or({});
-    value.description = spkg::json::As<std::optional<std::string>>(description_node).value_or({});
+    ok &= object_node["id"] >> value.id;
+    ok &= object_node["version"] >> value.version;
+    ok &= object_node["main"] >> value.main;
 
-    value.env = spkg::json::As<std::optional<std::map<std::string, std::string>>>(env_node).value_or({});
+    ok &= get_opt(object_node["name"], value.name);
+    ok &= get_opt(object_node["description"], value.description);
+    ok &= get_opt(object_node["env"], value.env);
+    ok &= get_opt(object_node["setup"], value.setup);
+    ok &= get_opt(object_node["cache"], value.cache);
+    ok &= get_opt(object_node["fragments"], value.fragments);
 
-    if (!CommandListFromJson(setup_node, value.setup))
-        return false;
-
-    value.cache = spkg::json::As<std::optional<std::vector<std::string>>>(cache_node).value_or({});
-    value.main = spkg::json::As<fragment_t>(main_node);
-    value.fragments = spkg::json::As<std::optional<std::map<std::string, fragment_t>>>(fragments_node).value_or({});
-
-    return true;
+    return ok;
 }
 
 static std::filesystem::path get_home_path()
@@ -258,61 +284,61 @@ static std::filesystem::path get_config_path()
 }
 
 template<>
-bool FromJson(const spkg::json::JsonNode &node, std::filesystem::path &value)
+bool from_json(const json::Node &node, std::filesystem::path &value)
 {
-    if (!spkg::json::IsString(node))
+    if (std::string s; node >> s)
+    {
+        value = std::move(s);
+        return true;
+    }
+
+    return false;
+}
+
+template<>
+void to_json(json::Node &node, const std::filesystem::path &value)
+{
+    node << value.string();
+}
+
+template<>
+bool from_json(const json::Node &node, config_t &value)
+{
+    if (!json::IsObject(node))
         return false;
 
-    value = spkg::json::AsString(node);
-    return true;
+    auto &object_node = json::AsObject(node);
+
+    auto ok = true;
+
+    ok &= get_opt(object_node["packages"], value.packages, { get_packages_path() });
+    ok &= get_opt(object_node["cache"], value.cache, get_cache_path());
+    ok &= get_opt(object_node["installed"], value.installed);
+
+    return ok;
 }
 
 template<>
-void ToJson(spkg::json::JsonNode &node, const std::filesystem::path &value)
+void to_json(json::Node &node, const config_t &value)
 {
-    ToJson(node, value.string());
-}
+    json::ObjectNode object_node;
 
-template<>
-bool FromJson(const spkg::json::JsonNode &node, config_t &value)
-{
-    if (!spkg::json::IsObject(node))
-        return false;
-
-    auto &object_node = spkg::json::AsObject(node);
-
-    const auto packages_node = object_node["packages"];
-    const auto cache_node = object_node["cache"];
-    const auto installed_node = object_node["installed"];
-
-    value.packages = spkg::json::As<std::optional<std::vector<std::filesystem::path>>>(packages_node)
-            .value_or({ get_packages_path() });
-
-    value.cache = spkg::json::As<std::optional<std::filesystem::path>>(cache_node)
-            .value_or(get_cache_path());
-
-    value.installed = spkg::json::As<std::optional<std::map<std::string, std::vector<std::string>>>>(installed_node)
-            .value_or({});
-
-    return true;
-}
-
-template<>
-void ToJson(spkg::json::JsonNode &node, const config_t &value)
-{
-    spkg::json::JsonObjectNode object_node;
-
-    ToJson(object_node["packages"], value.packages);
-    ToJson(object_node["cache"], value.cache);
-    ToJson(object_node["installed"], value.installed);
+    object_node["packages"] << value.packages;
+    object_node["cache"] << value.cache;
+    object_node["installed"] << value.installed;
 
     node = std::move(object_node);
 }
 
 static config_t get_config()
 {
-    if (std::ifstream stream(get_config_path() / "config.json"); stream)
-        return spkg::json::Parse<config_t>(stream);
+    if (std::ifstream stream(get_config_path() / "config.json"); stream) {
+        json::Node node;
+        stream >> node;
+
+        if (config_t value; node >> value)
+            return value;
+    }
 
     return {
         .packages = { get_packages_path() },
@@ -332,8 +358,8 @@ static int set_config(const config_t &value)
         return 1;
     }
 
-    spkg::json::JsonNode json;
-    ToJson(json, value);
+    json::Node json;
+    to_json(json, value);
     stream << json;
 
     return 0;
@@ -381,10 +407,15 @@ static int list(const config_t &config)
             if (!stream)
                 continue;
 
-            auto package = spkg::json::Parse<package_t>(stream);
+            json::Node node;
+            stream >> node;
+
+            package_t package;
+            node >> package;
 
             std::cout << package.id << ':' << package.version << std::endl;
             std::cout << package.name << " - " << package.description << std::endl;
+            
             for (auto &[key, fragment] : package.fragments)
             {
                 std::cout << "   - /" << key << std::endl;
@@ -413,9 +444,9 @@ static void copy_cache(
 }
 
 static int exec(
+    const std::filesystem::path &dir,
     const std::string &file,
     const std::vector<std::string> &args,
-    const std::filesystem::path &dir,
     const std::map<std::string, std::string> &envs)
 {
     std::vector<char *> argv;
@@ -453,68 +484,38 @@ static int exec(
     return -1;
 }
 
-std::vector<std::string> split_command_line(const std::string &line)
+static int exec(
+    const package_t &package,
+    const command_step_t &step,
+    const std::filesystem::path &work_dir)
 {
     std::vector<std::string> args;
-    std::string current;
+    args.push_back(step.file);
+    args.insert(args.end(), step.args.begin(), step.args.end());
 
-    auto single_quote = false;
-    auto double_quote = false;
-    auto escape = false;
+    std::map<std::string, std::string> envs;
+    envs.insert(package.env.begin(), package.env.end());
+    envs.insert(step.env.begin(), step.env.end());
 
-    for (const auto c : line)
-    {
-        if (escape)
-        {
-            current += c;
-            escape = false;
-            continue;
-        }
-
-        if (c == '\\')
-        {
-            escape = true;
-            continue;
-        }
-
-        if (c == '"' && !single_quote)
-        {
-            double_quote = !double_quote;
-            continue;
-        }
-
-        if (c == '\'' && !double_quote)
-        {
-            single_quote = !single_quote;
-            continue;
-        }
-
-        if (std::isspace(static_cast<unsigned char>(c)) && !single_quote && !double_quote)
-        {
-            if (!current.empty())
-            {
-                args.push_back(current);
-                current.clear();
-            }
-            continue;
-        }
-
-        current += c;
-    }
-
-    if (!current.empty())
-        args.push_back(current);
-
-    return args;
+    return exec(work_dir / step.dir, step.file, args, envs);
 }
 
 static int exec(
-    const std::string &line,
-    const std::filesystem::path &dir,
-    const std::map<std::string, std::string> &envs)
+    const package_t &package,
+    const fragment_t &fragment,
+    const command_step_t &step,
+    const std::filesystem::path &work_dir)
 {
-    const auto args = split_command_line(line);
-    return exec(args[0], args, dir, envs);
+    std::vector<std::string> args;
+    args.push_back(step.file);
+    args.insert(args.end(), step.args.begin(), step.args.end());
+
+    std::map<std::string, std::string> envs;
+    envs.insert(package.env.begin(), package.env.end());
+    envs.insert(fragment.env.begin(), fragment.env.end());
+    envs.insert(step.env.begin(), step.env.end());
+
+    return exec(work_dir / fragment.dir / step.dir, step.file, args, envs);
 }
 
 static int install(config_t &config, const std::string_view arg)
@@ -536,7 +537,10 @@ static int install(config_t &config, const std::string_view arg)
             if (!stream)
                 continue;
 
-            package = spkg::json::Parse<package_t>(stream);
+            json::Node node;
+            stream >> node;
+            node >> package;
+
             found = package.id == specifier.id
                     && (specifier.version.empty() || package.version == specifier.version);
 
@@ -575,111 +579,111 @@ static int install(config_t &config, const std::string_view arg)
     auto cache_key = package.id
                      + (specifier.fragment.empty() ? "" : '-' + std::string(specifier.fragment))
                      + '-' + package.version;
-    auto work_path = config.cache / cache_key;
-    auto package_cache_path = config.cache / package.id / package.version / "__package__";
-    auto fragment_cache_path = config.cache / package.id / package.version / (specifier.fragment.empty()
-                                                                                  ? "__fragment__"
-                                                                                  : specifier.fragment);
+    auto work_dir = config.cache / cache_key;
 
-    std::filesystem::create_directories(work_path);
-    if (!std::filesystem::exists(work_path))
+    auto cache_dir = config.cache / package.id / package.version;
+    auto package_cache_dir = cache_dir / "__package__";
+    auto fragment_cache_dir = cache_dir / (specifier.fragment.empty() ? "__fragment__" : specifier.fragment);
+
+    std::filesystem::create_directories(work_dir);
+    if (!std::filesystem::exists(work_dir))
     {
-        std::cerr << "Install failed: failed to create work directory '" << work_path.string() << "'." << std::endl;
+        std::cerr << "Install failed: failed to create work directory '" << work_dir.string() << "'." << std::endl;
         return 1;
     }
 
-    if (std::filesystem::exists(package_cache_path))
-        copy_cache(package_cache_path, work_path, package.cache);
+    if (std::filesystem::exists(package_cache_dir))
+        copy_cache(package_cache_dir, work_dir, package.cache);
     else
     {
         for (auto &step : package.setup)
-            if (auto code = exec(step, work_path, package.env))
+            if (auto code = exec(package, fragment, step, work_dir))
             {
                 std::cerr
                         << "Install failed: setup step '"
                         << step
-                        << "' exited with non-zero error code "
+                        << "' exited with non-zero code "
                         << code
                         << "."
                         << std::endl;
 
-                std::filesystem::remove_all(work_path);
+                std::filesystem::remove_all(work_dir);
                 return 1;
             }
 
-        std::filesystem::create_directories(package_cache_path);
+        std::filesystem::create_directories(package_cache_dir);
 
-        if (std::filesystem::exists(work_path))
-            copy_cache(work_path, package_cache_path, package.cache);
+        if (std::filesystem::exists(work_dir))
+            copy_cache(work_dir, package_cache_dir, package.cache);
         else
             std::cerr
                     << "Warning: failed to create cache directory '"
-                    << package_cache_path.string()
+                    << package_cache_dir.string()
                     << "'."
                     << std::endl;
     }
 
-    if (std::filesystem::exists(fragment_cache_path))
-        copy_cache(fragment_cache_path, work_path, fragment.cache);
+    if (std::filesystem::exists(fragment_cache_dir))
+        copy_cache(fragment_cache_dir, work_dir, fragment.cache);
 
     for (auto &step : fragment.configure)
-        if (auto code = exec(step, work_path / fragment.dir, fragment.env))
+        if (auto code = exec(package, step, work_dir))
         {
             std::cerr
                     << "Install failed: configure step '"
                     << step
-                    << "' exited with non-zero error code "
+                    << "' exited with non-zero code "
                     << code
                     << "."
                     << std::endl;
 
-            std::filesystem::remove_all(work_path);
+            std::filesystem::remove_all(work_dir);
             return 1;
         }
 
     for (auto &step : fragment.build)
-        if (auto code = exec(step, work_path / fragment.dir, fragment.env))
+        if (auto code = exec(package, fragment, step, work_dir))
         {
             std::cerr
                     << "Install failed: build step '"
                     << step
-                    << "' exited with non-zero error code "
+                    << "' exited with non-zero code "
                     << code
                     << "."
                     << std::endl;
 
-            std::filesystem::remove_all(work_path);
+            std::filesystem::remove_all(work_dir);
             return 1;
         }
 
-    if (std::filesystem::exists(fragment_cache_path))
-        copy_cache(work_path, fragment_cache_path, fragment.cache);
+    if (std::filesystem::exists(fragment_cache_dir))
+        copy_cache(work_dir, fragment_cache_dir, fragment.cache);
     else
     {
-        std::filesystem::create_directories(fragment_cache_path);
+        std::filesystem::create_directories(fragment_cache_dir);
 
-        if (std::filesystem::exists(fragment_cache_path))
-            copy_cache(work_path, fragment_cache_path, fragment.cache);
+        if (std::filesystem::exists(fragment_cache_dir))
+            copy_cache(work_dir, fragment_cache_dir, fragment.cache);
         else
             std::cerr
                     << "Warning: failed to create cache directory '"
-                    << fragment_cache_path.string()
+                    << fragment_cache_dir.string()
                     << "'."
                     << std::endl;
     }
 
     for (auto &step : fragment.install)
-        if (auto code = exec(step, work_path / fragment.dir, fragment.env))
+        if (auto code = exec(package, fragment, step, work_dir))
         {
             std::cerr
                     << "Install failed: install step '"
                     << step
-                    << "' exited with non-zero error code "
+                    << "' exited with non-zero code "
                     << code
                     << "."
                     << std::endl;
 
-            std::filesystem::remove_all(work_path);
+            std::filesystem::remove_all(work_dir);
             return 1;
         }
 
@@ -703,7 +707,7 @@ static int install(config_t &config, const std::string_view arg)
 
     config.installed[cache_key] = std::move(installed);
 
-    std::filesystem::remove_all(work_path);
+    std::filesystem::remove_all(work_dir);
     return 0;
 }
 
