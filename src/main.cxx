@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -119,14 +120,48 @@ std::ostream &operator<<(std::ostream &stream, const command_step_t &step)
     return stream;
 }
 
+template<>
+struct std::formatter<command_step_t> : std::formatter<std::string>
+{
+    template<typename C>
+    auto format(const command_step_t &step, C &context) const
+    {
+        std::string str;
+        if (!step.dir.empty())
+            str += "[" + step.dir + "] ";
+        for (auto &[key, val] : step.env)
+            str += key + "=" + val + " ";
+        str += step.file;
+        for (auto &arg : step.args)
+            str += " '" + arg + "'";
+
+        return std::formatter<std::string>::format(str, context);
+    }
+};
+
+template<typename... A>
+auto log_warning(std::format_string<A...> &&format, A &&... args)
+{
+    std::cerr << "Warning: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...);
+}
+
+template<typename... A>
+auto log_error(std::format_string<A...> &&format, A &&... args)
+{
+    std::cerr << "Error: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...);
+    return 1;
+}
+
 template<typename T>
 bool get_opt(const json::Node &node, T &value, T default_value = {})
 {
-    std::optional<T> opt;
-    if (!(node >> opt))
-        return false;
-    value = std::move(opt.value_or(std::move(default_value)));
-    return true;
+    if (std::optional<T> opt; node >> opt)
+    {
+        value = std::move(opt.value_or(std::move(default_value)));
+        return true;
+    }
+    
+    return false;
 }
 
 template<>
@@ -187,6 +222,27 @@ bool from_json(const json::Node &node, command_list_t &value)
     }
 
     return ok;
+}
+
+template<>
+bool from_json(const json::Node &node, file_reference_type &value)
+{
+    static const std::map<std::string, file_reference_type> m
+    {
+        { "file", file_reference_type::file },
+        { "manifest", file_reference_type::manifest },
+    };
+
+    if (std::string s; node >> s)
+    {
+        if (!m.contains(s))
+            return false;
+
+        value = m.at(s);
+        return true;
+    }
+
+    return false;
 }
 
 template<>
@@ -351,12 +407,16 @@ static int set_config(const config_t &value)
 {
     const auto path = get_config_path() / "config.json";
 
+    std::filesystem::create_directories(path.parent_path());
+    if (!std::filesystem::exists(path.parent_path()))
+        return log_error("failed to create config parent directory '{}'", path.parent_path().string());
+
+    if (!std::filesystem::is_directory(path.parent_path()))
+        return log_error("config parent path '{}' is not a directory", path.parent_path().string());
+
     std::ofstream stream(path);
     if (!stream)
-    {
-        std::cerr << "Failed open config file '" << path.string() << "'." << std::endl;
-        return 1;
-    }
+        return log_error("failed open config file '{}'", path.string());
 
     json::Node json;
     to_json(json, value);
@@ -380,7 +440,7 @@ static std::vector<std::string> read_manifest(const std::filesystem::path &path)
 
 static int help()
 {
-    std::cerr <<
+    std::cout <<
             "spkg\n"
             "\n"
             "spkg [help|h]                                  - print manual\n"
@@ -396,6 +456,19 @@ static int help()
 static int list(const config_t &config)
 {
     for (auto &path : config.packages)
+    {
+        if (!std::filesystem::exists(path))
+        {
+            log_warning("package repository path '{}' in config does not exist", path.string());
+            continue;
+        }
+
+        if (!std::filesystem::is_directory(path))
+        {
+            log_warning("package repository path '{}' in config is not a directory", path.string());
+            continue;
+        }
+
         for (auto &entry : std::filesystem::directory_iterator(path))
         {
             if (entry.is_directory())
@@ -411,7 +484,11 @@ static int list(const config_t &config)
             stream >> node;
 
             package_t package;
-            node >> package;
+            if (!(node >> package))
+            {
+                log_warning("invalid package json in file '{}'", entry.path().string());
+                continue;
+            }
 
             std::cout << package.id << ':' << package.version << std::endl;
             std::cout << package.name << " - " << package.description << std::endl;
@@ -422,6 +499,7 @@ static int list(const config_t &config)
                 std::cout << "     " << fragment.name << " - " << fragment.description << std::endl;
             }
         }
+    }
 
     return 0;
 }
@@ -549,10 +627,7 @@ static int install(config_t &config, const std::string_view arg)
         }
 
     if (!found)
-    {
-        std::cerr << "No package '" << specifier.id << ':' << specifier.version << "'." << std::endl;
-        return 1;
-    }
+        return log_error("no package '{}:{}'", specifier.id, specifier.version);
 
     fragment_t fragment;
     if (specifier.fragment.empty())
@@ -560,18 +635,7 @@ static int install(config_t &config, const std::string_view arg)
     else
     {
         if (!package.fragments.contains(std::string(specifier.fragment)))
-        {
-            std::cerr
-                    << "No fragment '"
-                    << specifier.fragment
-                    << "' in package '"
-                    << specifier.id
-                    << ':'
-                    << specifier.version
-                    << "'."
-                    << std::endl;
-            return 1;
-        }
+            return log_error("no fragment '{}' in package '{}:{}'", specifier.fragment, specifier.id, specifier.version);
 
         fragment = package.fragments.at(std::string(specifier.fragment));
     }
@@ -587,10 +651,7 @@ static int install(config_t &config, const std::string_view arg)
 
     std::filesystem::create_directories(work_dir);
     if (!std::filesystem::exists(work_dir))
-    {
-        std::cerr << "Install failed: failed to create work directory '" << work_dir.string() << "'." << std::endl;
-        return 1;
-    }
+        return log_error("failed to create work directory '{}'", work_dir.string());
 
     if (std::filesystem::exists(package_cache_dir))
         copy_cache(package_cache_dir, work_dir, package.cache);
@@ -599,16 +660,8 @@ static int install(config_t &config, const std::string_view arg)
         for (auto &step : package.setup)
             if (auto code = exec(package, fragment, step, work_dir))
             {
-                std::cerr
-                        << "Install failed: setup step '"
-                        << step
-                        << "' exited with non-zero code "
-                        << code
-                        << "."
-                        << std::endl;
-
                 std::filesystem::remove_all(work_dir);
-                return 1;
+                return log_error("setup step '{}' exited with non-zero code {}", step, code);
             }
 
         std::filesystem::create_directories(package_cache_dir);
@@ -616,11 +669,7 @@ static int install(config_t &config, const std::string_view arg)
         if (std::filesystem::exists(work_dir))
             copy_cache(work_dir, package_cache_dir, package.cache);
         else
-            std::cerr
-                    << "Warning: failed to create cache directory '"
-                    << package_cache_dir.string()
-                    << "'."
-                    << std::endl;
+            log_warning("failed to create cache directory '{}'", package_cache_dir.string());
     }
 
     if (std::filesystem::exists(fragment_cache_dir))
@@ -629,31 +678,15 @@ static int install(config_t &config, const std::string_view arg)
     for (auto &step : fragment.configure)
         if (auto code = exec(package, step, work_dir))
         {
-            std::cerr
-                    << "Install failed: configure step '"
-                    << step
-                    << "' exited with non-zero code "
-                    << code
-                    << "."
-                    << std::endl;
-
             std::filesystem::remove_all(work_dir);
-            return 1;
+            return log_error("configure step '{}' exited with non-zero code {}", step, code);
         }
 
     for (auto &step : fragment.build)
         if (auto code = exec(package, fragment, step, work_dir))
         {
-            std::cerr
-                    << "Install failed: build step '"
-                    << step
-                    << "' exited with non-zero code "
-                    << code
-                    << "."
-                    << std::endl;
-
             std::filesystem::remove_all(work_dir);
-            return 1;
+            return log_error("build step '{}' exited with non-zero code {}", step, code);
         }
 
     if (std::filesystem::exists(fragment_cache_dir))
@@ -665,26 +698,14 @@ static int install(config_t &config, const std::string_view arg)
         if (std::filesystem::exists(fragment_cache_dir))
             copy_cache(work_dir, fragment_cache_dir, fragment.cache);
         else
-            std::cerr
-                    << "Warning: failed to create cache directory '"
-                    << fragment_cache_dir.string()
-                    << "'."
-                    << std::endl;
+            log_warning("failed to create cache directory '{}'", fragment_cache_dir.string());
     }
 
     for (auto &step : fragment.install)
         if (auto code = exec(package, fragment, step, work_dir))
         {
-            std::cerr
-                    << "Install failed: install step '"
-                    << step
-                    << "' exited with non-zero code "
-                    << code
-                    << "."
-                    << std::endl;
-
             std::filesystem::remove_all(work_dir);
-            return 1;
+            return log_error("install step '{}' exited with non-zero code {}", step, code);
         }
 
     std::vector<std::string> installed;
