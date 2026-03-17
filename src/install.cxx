@@ -170,11 +170,10 @@ static int exec(
     char buffer[4096];
     std::ostringstream stream;
     for (ssize_t n; (n = read(pipes[0], buffer, sizeof(buffer))) > 0;)
-    {
-        if (!out)
+        if (out)
+            stream.write(buffer, n);
+        else
             write(STDOUT_FILENO, buffer, n);
-        stream.write(buffer, n);
-    }
     close(pipes[0]);
 
     auto status = 0;
@@ -270,37 +269,7 @@ int spkg::Install(Config &config, const std::string_view arg)
     const Specifier specifier(arg);
 
     Package package;
-    auto found = false;
-
-    for (auto &path : config.Packages)
-        for (auto &entry : std::filesystem::directory_iterator(path))
-        {
-            if (entry.is_directory())
-                continue;
-            if (entry.path().extension() != ".json")
-                continue;
-
-            std::ifstream stream(entry.path());
-            if (!stream)
-                continue;
-
-            json::Node node;
-            stream >> node;
-
-            if (!(node >> package))
-            {
-                Warning("invalid package json in file '{}'", entry.path().string());
-                continue;
-            }
-
-            found = package.Id == specifier.Id
-                    && (specifier.Version.empty() || package.Version == specifier.Version);
-
-            if (found)
-                break;
-        }
-
-    if (!found)
+    if (!FindPackage(config, specifier, package))
         return Error("no package '{}:{}'", specifier.Id, specifier.Version);
 
     const Fragment *fragment_ptr = &package.Main;

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <set>
@@ -130,6 +131,9 @@ namespace spkg
     std::filesystem::path GetDefaultPackagesDir();
     std::filesystem::path GetDefaultCacheDir();
     std::filesystem::path GetConfigDir();
+
+    bool FindPackage(const Config &config, const Specifier &specifier, Package &package);
+    bool ForEachPackage(const Config &config, const std::function<bool(Package &&)> &fn);
 }
 
 template<>
