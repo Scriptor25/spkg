@@ -2,152 +2,150 @@
 
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <iostream>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
+#include <json.hxx>
+
 namespace spkg
 {
-    enum class file_reference_type
+    enum class FileReferenceType
     {
         file,
         manifest,
     };
 
-    struct file_reference_t
+    struct FileReference
     {
-        file_reference_type type{};
-        std::string path;
+        FileReferenceType Type{};
+        std::string Path;
     };
 
-    struct command_step_t
+    struct CommandStep
     {
-        std::vector<std::string> command;
+        std::vector<std::string> Command;
+        std::string Capture;
 
-        std::string dir;
-        std::map<std::string, std::string> env;
+        std::string Dir;
+        std::map<std::string, std::string> Env;
     };
 
-    using command_list_t = std::vector<command_step_t>;
+    using CommandList = std::vector<CommandStep>;
 
-    struct fragment_t
+    struct Fragment
     {
-        std::string name;
-        std::string description;
-        
-        std::string dir;
-        std::map<std::string, std::string> env;
-        
-        command_list_t configure;
-        command_list_t build;
-        command_list_t install;
+        std::string Name;
+        std::string Description;
 
-        std::vector<std::string> cache;
-        std::vector<file_reference_t> files;
+        std::string Dir;
+        std::map<std::string, std::string> Env;
+
+        CommandList Configure;
+        CommandList Build;
+        CommandList Install;
+
+        std::vector<std::string> Cache;
+        std::vector<FileReference> Files;
     };
 
-    struct package_t
+    struct Package
     {
-        std::string id;
-        std::string version;
+        std::string Id;
+        std::string Version;
 
-        std::string name;
-        std::string description;
-        
-        std::map<std::string, std::string> env;
+        std::string Name;
+        std::string Description;
 
-        command_list_t setup;
-        std::vector<std::string> cache;
+        std::map<std::string, std::string> Env;
 
-        fragment_t main;
-        std::map<std::string, fragment_t> fragments;
+        CommandList Setup;
+        std::vector<std::string> Cache;
+
+        Fragment Main;
+        std::map<std::string, Fragment> Fragments;
     };
 
-    struct config_t
+    struct Context
     {
-        std::set<std::filesystem::path> packages;
-        std::filesystem::path cache;
-
-        std::map<std::string, std::set<std::string>> installed;
+        std::vector<std::map<std::string, std::string>> Stack;
     };
 
-    struct specifier_t
+    struct Config
     {
-        specifier_t() = default;
+        std::set<std::filesystem::path> Packages;
+        std::filesystem::path Cache;
 
-        explicit specifier_t(const std::string_view s)
-        {
-            const auto fragment_begin = s.find_last_of('/');
-            const auto version_begin = s.find_last_of(':');
-
-            const auto id_length = fragment_begin == std::string_view::npos
-                                    ? version_begin == std::string_view::npos
-                                            ? std::string_view::npos
-                                            : version_begin
-                                    : fragment_begin;
-            id = s.substr(0, id_length);
-
-            if (fragment_begin != std::string_view::npos)
-            {
-                const auto fragment_length = version_begin == std::string_view::npos
-                                                ? std::string_view::npos
-                                                : version_begin - fragment_begin - 1;
-                fragment = s.substr(fragment_begin + 1, fragment_length);
-            }
-
-            if (version_begin != std::string_view::npos)
-                version = s.substr(version_begin + 1);
-        }
-
-        std::string_view id;
-        std::string_view fragment;
-        std::string_view version;
+        std::map<std::string, std::set<std::string>> Installed;
     };
 
-    std::ostream &operator<<(std::ostream &stream, const command_step_t &step)
+    struct Specifier
     {
-        if (!step.dir.empty())
-            stream << "[" << step.dir << "] ";
-        for (auto &[key, val] : step.env)
-            stream << key << "=" << val << " ";
-        for (auto it = step.command.begin(); it != step.command.end(); ++it)
-        {
-            if (it != step.command.begin())
-                stream << ' ';
-            stream << "'" << *it << "'";
-        }
-        return stream;
+        Specifier() = default;
+
+        explicit Specifier(std::string_view s);
+
+        std::string_view Id;
+        std::string_view Fragment;
+        std::string_view Version;
+    };
+
+    std::ostream &operator<<(std::ostream &stream, const CommandStep &step);
+
+    template<typename... A>
+    auto Info(std::format_string<A...> &&format, A &&... args)
+    {
+        std::cerr << "Info: " << std::format<A...>(
+            std::forward<std::format_string<A...>>(format),
+            std::forward<A>(args)...) << std::endl;
     }
 
     template<typename... A>
-    auto log_warning(std::format_string<A...> &&format, A &&... args)
+    auto Warning(std::format_string<A...> &&format, A &&... args)
     {
-        std::cerr << "Warning: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...) << std::endl;
+        std::cerr << "Warning: " << std::format<A...>(
+            std::forward<std::format_string<A...>>(format),
+            std::forward<A>(args)...) << std::endl;
     }
 
     template<typename... A>
-    auto log_error(std::format_string<A...> &&format, A &&... args)
+    auto Error(std::format_string<A...> &&format, A &&... args)
     {
-        std::cerr << "Error: " << std::format<A...>(std::forward<std::format_string<A...>>(format), std::forward<A>(args)...) << std::endl;
+        std::cerr << "Error: " << std::format<A...>(
+            std::forward<std::format_string<A...>>(format),
+            std::forward<A>(args)...) << std::endl;
         return 1;
     }
+
+    int Help();
+    int List(const Config &config);
+    int Install(Config &config, std::string_view arg);
+    int Remove(Config &config, std::string_view arg);
+    int Update(Config &config, std::string_view arg = {});
+
+    std::filesystem::path GetHomeDir();
+    std::filesystem::path GetDefaultPackagesDir();
+    std::filesystem::path GetDefaultCacheDir();
+    std::filesystem::path GetConfigDir();
 }
 
 template<>
-struct std::formatter<spkg::command_step_t> : std::formatter<std::string>
+struct std::formatter<spkg::CommandStep> : std::formatter<std::string>
 {
     template<typename C>
-    auto format(const spkg::command_step_t &step, C &context) const
+    auto format(const spkg::CommandStep &step, C &context) const
     {
         std::string str;
-        if (!step.dir.empty())
-            str += "[" + step.dir + "] ";
-        for (auto &[key, val] : step.env)
+        if (!step.Dir.empty())
+            str += "[" + step.Dir + "] ";
+        for (auto &[key, val] : step.Env)
             str += key + "=" + val + " ";
-        for (auto it = step.command.begin(); it != step.command.end(); ++it)
+        for (auto it = step.Command.begin(); it != step.Command.end(); ++it)
         {
-            if (it != step.command.begin())
+            if (it != step.Command.begin())
                 str += ' ';
             str += "'" + *it + "'";
         }
@@ -155,3 +153,33 @@ struct std::formatter<spkg::command_step_t> : std::formatter<std::string>
         return std::formatter<std::string>::format(str, context);
     }
 };
+
+template<>
+bool from_json(const json::Node &node, std::filesystem::path &value);
+
+template<>
+void to_json(json::Node &node, const std::filesystem::path &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::CommandStep &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::CommandList &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::FileReferenceType &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::FileReference &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::Fragment &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::Package &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::Config &value);
+
+template<>
+void to_json(json::Node &node, const spkg::Config &value);
