@@ -18,6 +18,7 @@ bool from_json(const json::Node &node, spkg::CommandStep &value)
 
     ok &= object_node["command"] >> value.Command;
     ok &= from_json_opt(object_node["capture"], value.Capture);
+    ok &= from_json_opt(object_node["output"], value.Output);
     ok &= from_json_opt(object_node["dir"], value.Dir);
     ok &= from_json_opt(object_node["env"], value.Env);
 

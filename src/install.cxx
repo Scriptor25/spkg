@@ -4,6 +4,104 @@
 #include <ranges>
 #include <spkg.hxx>
 
+static int copy_directory(const std::filesystem::path &from, const std::filesystem::path &to)
+{
+    std::error_code ec;
+
+    for (auto &entry : std::filesystem::directory_iterator(from))
+    {
+        auto &source = entry.path();
+        auto relative = std::filesystem::relative(source, from);
+        auto target = to / relative;
+
+        auto status = entry.status(ec);
+        if (ec)
+            return spkg::Error(
+                "failed to get status for entry '{}': {} ({})",
+                source.string(),
+                ec.message(),
+                ec.value());
+
+        switch (status.type())
+        {
+        case std::filesystem::file_type::regular:
+            if (std::filesystem::create_directories(target.parent_path(), ec); ec)
+                return spkg::Error(
+                    "failed to create directory '{}': {} ({})",
+                    target.parent_path().string(),
+                    ec.message(),
+                    ec.value());
+
+            if (std::filesystem::copy_file(
+                source,
+                target,
+                std::filesystem::copy_options::overwrite_existing,
+                ec); ec)
+                return spkg::Error(
+                    "failed to copy file from '{}' to '{}': {} ({})",
+                    source.string(),
+                    target.string(),
+                    ec.message(),
+                    ec.value());
+
+            if (std::filesystem::permissions(
+                target,
+                status.permissions(),
+                std::filesystem::perm_options::replace,
+                ec); ec)
+                return spkg::Error(
+                    "failed to set permissions for file '{}': {} ({})",
+                    target.string(),
+                    ec.message(),
+                    ec.value());
+
+            if (std::filesystem::last_write_time(
+                target,
+                std::filesystem::last_write_time(source),
+                ec); ec)
+                return spkg::Error(
+                    "failed to set last write time for file '{}': {} ({})",
+                    target.string(),
+                    ec.message(),
+                    ec.value());
+
+            break;
+
+        case std::filesystem::file_type::directory:
+            if (std::filesystem::create_directories(target, ec); ec)
+                return spkg::Error(
+                    "failed to create directory '{}': {} ({})",
+                    target.string(),
+                    ec.message(),
+                    ec.value());
+
+            if (const auto error = copy_directory(source, target))
+                return error;
+
+            break;
+
+        case std::filesystem::file_type::symlink:
+            if (std::filesystem::copy_symlink(
+                source,
+                target,
+                ec); ec)
+                return spkg::Error(
+                    "failed to copy symlink from '{}' to '{}': {} ({})",
+                    source.string(),
+                    target.string(),
+                    ec.message(),
+                    ec.value());
+
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static int copy_cache(
     const std::filesystem::path &src_path,
     const std::filesystem::path &dst_path,
@@ -14,23 +112,39 @@ static int copy_cache(
         auto from = src_path / entry;
         auto to = dst_path / entry;
 
-        std::error_code ec;
-        std::filesystem::copy(
-            from,
-            to,
-            std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing,
-            ec);
+        if (std::filesystem::exists(to))
+            if (std::error_code ec; std::filesystem::remove_all(to, ec), ec)
+                return spkg::Error(
+                    "failed to remove cache entry destination directory '{}': {} ({})",
+                    to.string(),
+                    ec.message(),
+                    ec.value());
 
-        if (ec)
-            return spkg::Error(
-                "failed to copy files from '{}' to '{}': {} ({})",
-                from.string(),
-                to.string(),
-                ec.message(),
-                ec.value());
+        if (const auto error = copy_directory(from, to))
+            return error;
     }
 
     return 0;
+}
+
+static void remove_work_directory(const std::filesystem::path &path)
+{
+    if (std::error_code ec; std::filesystem::remove_all(path, ec), ec)
+        spkg::Warning(
+            "failed to remove work directory '{}': {} ({})",
+            path.string(),
+            ec.message(),
+            ec.value());
+}
+
+static void remove_cache_directory(const std::filesystem::path &path)
+{
+    if (std::error_code ec; std::filesystem::remove_all(path, ec), ec)
+        spkg::Warning(
+            "failed to remove cache directory '{}': {} ({})",
+            path.string(),
+            ec.message(),
+            ec.value());
 }
 
 static std::string trim(const std::string &s)
@@ -129,7 +243,7 @@ static int write_map_manifest(const std::filesystem::path &path, const std::map<
 }
 
 static int exec(
-    std::string *out,
+    const std::vector<std::ostream *> &streams,
     const std::filesystem::path &dir,
     const std::string &file,
     const std::vector<std::string> &args,
@@ -168,20 +282,22 @@ static int exec(
     close(pipes[1]);
 
     char buffer[4096];
-    std::ostringstream stream;
     for (ssize_t n; (n = read(pipes[0], buffer, sizeof(buffer))) > 0;)
-        if (out)
-            stream.write(buffer, n);
-        else
+    {
+        if (streams.empty())
+        {
             write(STDOUT_FILENO, buffer, n);
+            continue;
+        }
+
+        for (auto &stream : streams)
+            stream->write(buffer, n);
+    }
     close(pipes[0]);
 
     auto status = 0;
     if (waitpid(pid, &status, 0) < 0)
         return -1;
-
-    if (out)
-        *out = rtrim(stream.str());
 
     if (WIFEXITED(status))
         return WEXITSTATUS(status);
@@ -231,9 +347,31 @@ static int exec(
         }
     }
 
-    const auto out = step.Capture.empty() ? nullptr : &context.Stack.back()[step.Capture];
+    std::vector<std::ostream *> streams;
 
-    return exec(out, work_dir / step.Dir, command[0], command, envs);
+    std::unique_ptr<std::ostringstream> capture_stream;
+    if (!step.Capture.empty())
+    {
+        capture_stream = std::make_unique<std::ostringstream>();
+        streams.push_back(capture_stream.get());
+    }
+
+    std::unique_ptr<std::ofstream> output_stream;
+    if (!step.Output.empty())
+    {
+        output_stream = std::make_unique<std::ofstream>(work_dir / step.Dir / step.Output);
+        streams.push_back(output_stream.get());
+    }
+
+    const auto code = exec(streams, work_dir / step.Dir, command[0], command, envs);
+
+    if (!step.Capture.empty())
+    {
+        auto &capture = context.Stack.back()[step.Capture];
+        capture = rtrim(capture_stream->str());
+    }
+
+    return code;
 }
 
 static int exec(
@@ -288,6 +426,7 @@ int spkg::Install(Config &config, const std::string_view arg)
     auto &fragment = *fragment_ptr;
 
     Context context;
+    std::error_code ec;
 
     auto cache_key = package.Id
                      + (specifier.Fragment.empty() ? "" : '-' + std::string(specifier.Fragment))
@@ -295,82 +434,145 @@ int spkg::Install(Config &config, const std::string_view arg)
     auto work_dir = config.Cache / cache_key;
 
     auto cache_dir = config.Cache / package.Id / package.Version;
+
     auto package_cache_dir = cache_dir / "__package__";
     auto fragment_cache_dir = cache_dir / (specifier.Fragment.empty() ? "__fragment__" : specifier.Fragment);
 
-    std::filesystem::create_directories(work_dir);
-    if (!std::filesystem::exists(work_dir))
-        return Error("failed to create work directory '{}'", work_dir.string());
+    auto package_manifest_path = package_cache_dir / "manifest.txt";
+    auto fragment_manifest_path = fragment_cache_dir / "manifest.txt";
+
+    Info("creating work directory '{}'", work_dir.string());
+    if (std::filesystem::create_directories(work_dir, ec); ec)
+        return Error(
+            "failed to create work directory '{}': {} ({})",
+            work_dir.string(),
+            ec.message(),
+            ec.value());
 
     auto &package_frame = context.Stack.emplace_back();
 
-    if (std::filesystem::exists(package_cache_dir))
+    if (std::filesystem::exists(package_cache_dir) && !std::filesystem::is_empty(package_cache_dir))
     {
+        Info("restoring package cache from '{}'", package_cache_dir.string());
         if (auto error = copy_cache(package_cache_dir, work_dir, package.Cache))
+        {
+            remove_work_directory(work_dir);
             return error;
+        }
 
-        if (auto error = read_map_manifest(package_cache_dir / "manifest.txt", package_frame))
+        Info("restoring package manifest from '{}'", package_manifest_path.string());
+        if (auto error = read_map_manifest(package_manifest_path, package_frame))
+        {
+            remove_work_directory(work_dir);
             return error;
+        }
     }
     else
     {
+        Info("executing package setup");
+
         for (auto &step : package.Setup)
             if (auto code = exec(context, package, step, work_dir))
             {
-                std::filesystem::remove_all(work_dir);
-                return Error("setup step '{}' exited with non-zero code {}", step, code);
+                remove_work_directory(work_dir);
+                return Error("package setup step '{}' exited with non-zero code {}", step, code);
             }
 
-        std::filesystem::create_directories(package_cache_dir);
-        if (!std::filesystem::exists(package_cache_dir))
-            return Error("failed to create cache directory '{}'", package_cache_dir.string());
+        Info("creating package cache directory '{}'", package_cache_dir.string());
+        if (std::filesystem::create_directories(package_cache_dir, ec); ec)
+        {
+            remove_work_directory(work_dir);
+            return Error(
+                "failed to create package cache directory '{}': {} ({})",
+                package_cache_dir.string(),
+                ec.message(),
+                ec.value());
+        }
 
+        Info("saving package cache to '{}'", package_cache_dir.string());
         if (auto error = copy_cache(work_dir, package_cache_dir, package.Cache))
+        {
+            remove_work_directory(work_dir);
+            remove_cache_directory(package_cache_dir);
             return error;
+        }
 
-        if (auto error = write_map_manifest(package_cache_dir / "manifest.txt", package_frame))
+        Info("saving package manifest to '{}'", package_manifest_path.string());
+        if (auto error = write_map_manifest(package_manifest_path, package_frame))
+        {
+            remove_work_directory(work_dir);
+            remove_cache_directory(package_cache_dir);
             return error;
+        }
     }
 
     auto &fragment_frame = context.Stack.emplace_back();
 
     if (std::filesystem::exists(fragment_cache_dir))
     {
+        Info("restoring fragment cache from '{}'", fragment_cache_dir.string());
         if (auto error = copy_cache(fragment_cache_dir, work_dir, fragment.Cache))
+        {
+            remove_work_directory(work_dir);
             return error;
+        }
 
-        if (auto error = read_map_manifest(fragment_cache_dir / "manifest.txt", fragment_frame))
+        Info("restoring fragment manifest from '{}'", fragment_manifest_path.string());
+        if (auto error = read_map_manifest(fragment_manifest_path, fragment_frame))
+        {
+            remove_work_directory(work_dir);
             return error;
+        }
     }
 
+    Info("executing fragment configure");
     for (auto &step : fragment.Configure)
         if (auto code = exec(context, package, fragment, step, work_dir))
         {
-            std::filesystem::remove_all(work_dir);
+            remove_work_directory(work_dir);
             return Error("configure step '{}' exited with non-zero code {}", step, code);
         }
 
+    Info("executing fragment build");
     for (auto &step : fragment.Build)
         if (auto code = exec(context, package, fragment, step, work_dir))
         {
-            std::filesystem::remove_all(work_dir);
+            remove_work_directory(work_dir);
             return Error("build step '{}' exited with non-zero code {}", step, code);
         }
 
-    std::filesystem::create_directories(fragment_cache_dir);
-    if (!std::filesystem::exists(fragment_cache_dir))
-        return Error("failed to create cache directory '{}'", fragment_cache_dir.string());
+    Info("creating fragment cache directory '{}'", fragment_cache_dir.string());
+    if (std::filesystem::create_directories(fragment_cache_dir, ec); ec)
+    {
+        remove_work_directory(work_dir);
+        return Error(
+            "failed to create fragment cache directory '{}': {} ({})",
+            fragment_cache_dir.string(),
+            ec.message(),
+            ec.value());
+    }
 
+    Info("saving fragment cache to '{}'", fragment_cache_dir.string());
     if (auto error = copy_cache(work_dir, fragment_cache_dir, fragment.Cache))
+    {
+        remove_work_directory(work_dir);
+        remove_cache_directory(fragment_cache_dir);
         return error;
+    }
 
-    if (auto error = write_map_manifest(fragment_cache_dir / "manifest.txt", fragment_frame))
+    Info("saving fragment manifest to '{}'", fragment_manifest_path.string());
+    if (auto error = write_map_manifest(fragment_manifest_path, fragment_frame))
+    {
+        remove_work_directory(work_dir);
+        remove_cache_directory(fragment_cache_dir);
         return error;
+    }
 
+    Info("executing fragment install");
     for (auto &step : fragment.Install)
         if (auto code = exec(context, package, fragment, step, work_dir))
         {
-            std::filesystem::remove_all(work_dir);
+            remove_work_directory(work_dir);
             return Error("install step '{}' exited with non-zero code {}", step, code);
         }
 
@@ -391,6 +593,7 @@ int spkg::Install(Config &config, const std::string_view arg)
         }
         }
 
-    std::filesystem::remove_all(work_dir);
+    Info("cleaning up work directory '{}'", work_dir.string());
+    remove_work_directory(work_dir);
     return 0;
 }

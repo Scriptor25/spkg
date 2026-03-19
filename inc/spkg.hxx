@@ -29,7 +29,9 @@ namespace spkg
     struct CommandStep
     {
         std::vector<std::string> Command;
+
         std::string Capture;
+        std::string Output;
 
         std::string Dir;
         std::map<std::string, std::string> Env;
