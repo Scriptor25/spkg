@@ -1,14 +1,14 @@
 #include <spkg.hxx>
 
-std::ostream &spkg::operator<<(std::ostream &stream, const CommandStep &step)
+std::ostream &spkg::operator<<(std::ostream &stream, const Command &command)
 {
-    if (!step.Dir.empty())
-        stream << "[" << step.Dir << "] ";
-    for (auto &[key, val] : step.Env)
+    if (!command.Dir.empty())
+        stream << "[" << command.Dir << "] ";
+    for (auto &[key, val] : command.Env)
         stream << key << "=" << val << " ";
-    for (auto it = step.Command.begin(); it != step.Command.end(); ++it)
+    for (auto it = command.Args.begin(); it != command.Args.end(); ++it)
     {
-        if (it != step.Command.begin())
+        if (it != command.Args.begin())
             stream << ' ';
         stream << "'" << *it << "'";
     }
@@ -19,11 +19,13 @@ bool spkg::FindPackage(const Config &config, const Specifier &specifier, Package
 {
     return ForEachPackage(
         config,
-        [&](Package &&pkg)
+        [&](Package &&value)
         {
-            const auto found = pkg.Id == specifier.Id
-                               && (specifier.Version.empty() || pkg.Version == specifier.Version);
-            package = std::forward<Package>(pkg);
+            const auto found = value.Id == specifier.Id
+                               && (specifier.Version.empty()
+                                   || value.Version == "*"
+                                   || value.Version == specifier.Version);
+            package = std::forward<Package>(value);
             return found;
         });
 }

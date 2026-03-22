@@ -1,6 +1,6 @@
 #include <spkg.hxx>
 
-int spkg::Remove(Config &config, const std::string_view arg)
+int spkg::Remove(Config &config, const std::string &arg)
 {
     const Specifier specifier(arg);
 

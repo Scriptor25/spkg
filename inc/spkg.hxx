@@ -14,6 +14,17 @@
 
 namespace spkg
 {
+    struct Package;
+
+    struct Context
+    {
+        const Package &Pkg;
+
+        std::filesystem::path WorkDir;
+
+        std::vector<std::map<std::string, std::string>> Stack;
+    };
+
     enum class FileReferenceType
     {
         file,
@@ -26,9 +37,9 @@ namespace spkg
         std::string Path;
     };
 
-    struct CommandStep
+    struct Command
     {
-        std::vector<std::string> Command;
+        std::vector<std::string> Args;
 
         std::string Capture;
         std::string Output;
@@ -37,7 +48,18 @@ namespace spkg
         std::map<std::string, std::string> Env;
     };
 
-    using CommandList = std::vector<CommandStep>;
+    struct Step
+    {
+        std::string Id;
+
+        std::string Dir;
+        std::map<std::string, std::string> Env;
+
+        std::vector<std::string> Cache;
+        bool Once;
+
+        std::vector<Command> Run;
+    };
 
     struct Fragment
     {
@@ -47,11 +69,8 @@ namespace spkg
         std::string Dir;
         std::map<std::string, std::string> Env;
 
-        CommandList Configure;
-        CommandList Build;
-        CommandList Install;
+        std::vector<Step> Steps;
 
-        std::vector<std::string> Cache;
         std::vector<FileReference> Files;
     };
 
@@ -65,16 +84,10 @@ namespace spkg
 
         std::map<std::string, std::string> Env;
 
-        CommandList Setup;
-        std::vector<std::string> Cache;
+        std::vector<Step> Setup;
 
-        Fragment Main;
+        Fragment Default;
         std::map<std::string, Fragment> Fragments;
-    };
-
-    struct Context
-    {
-        std::vector<std::map<std::string, std::string>> Stack;
     };
 
     struct Config
@@ -88,15 +101,14 @@ namespace spkg
     struct Specifier
     {
         Specifier() = default;
+        explicit Specifier(const std::string &s);
 
-        explicit Specifier(std::string_view s);
-
-        std::string_view Id;
-        std::string_view Fragment;
-        std::string_view Version;
+        std::string Id;
+        std::string Fragment;
+        std::string Version;
     };
 
-    std::ostream &operator<<(std::ostream &stream, const CommandStep &step);
+    std::ostream &operator<<(std::ostream &stream, const Command &command);
 
     template<typename... A>
     auto Info(std::format_string<A...> &&format, A &&... args)
@@ -125,9 +137,9 @@ namespace spkg
 
     int Help();
     int List(const Config &config);
-    int Install(Config &config, std::string_view arg);
-    int Remove(Config &config, std::string_view arg);
-    int Update(Config &config, std::string_view arg = {});
+    int Install(Config &config, const std::string &arg);
+    int Remove(Config &config, const std::string &arg);
+    int Update(Config &config, const std::string &arg = {});
 
     std::filesystem::path GetHomeDir();
     std::filesystem::path GetDefaultPackagesDir();
@@ -139,23 +151,18 @@ namespace spkg
 }
 
 template<>
-struct std::formatter<spkg::CommandStep> : std::formatter<std::string>
+struct std::formatter<spkg::Command> : std::formatter<std::string>
 {
     template<typename C>
-    auto format(const spkg::CommandStep &step, C &context) const
+    auto format(const spkg::Command &command, C &context) const
     {
         std::string str;
-        if (!step.Dir.empty())
-            str += "[" + step.Dir + "] ";
-        for (auto &[key, val] : step.Env)
-            str += key + "=" + val + " ";
-        for (auto it = step.Command.begin(); it != step.Command.end(); ++it)
+        for (auto it = command.Args.begin(); it != command.Args.end(); ++it)
         {
-            if (it != step.Command.begin())
+            if (it != command.Args.begin())
                 str += ' ';
             str += "'" + *it + "'";
         }
-
         return std::formatter<std::string>::format(str, context);
     }
 };
@@ -167,16 +174,19 @@ template<>
 void to_json(json::Node &node, const std::filesystem::path &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::CommandStep &value);
+bool from_json(const json::Node &node, spkg::Command &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::CommandList &value);
+bool from_json(const json::Node &node, std::vector<spkg::Command> &value);
 
 template<>
 bool from_json(const json::Node &node, spkg::FileReferenceType &value);
 
 template<>
 bool from_json(const json::Node &node, spkg::FileReference &value);
+
+template<>
+bool from_json(const json::Node &node, spkg::Step &value);
 
 template<>
 bool from_json(const json::Node &node, spkg::Fragment &value);

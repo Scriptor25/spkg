@@ -42,7 +42,7 @@ static int set_config(const spkg::Config &value)
 
 int main(const int argc, const char **argv)
 {
-    const std::vector<std::string_view> args(argv + 1, argv + argc);
+    const std::vector<std::string> args(argv + 1, argv + argc);
 
     if (args.empty() || ((args[0] == "help" || args[0] == "h") && args.size() == 1))
         return spkg::Help();
