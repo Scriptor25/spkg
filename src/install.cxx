@@ -140,6 +140,7 @@ static int copy_cache(
 
 static void remove_work_directory(const std::filesystem::path &path)
 {
+    spkg::Info("removing work directory '{}'", path.string());
     if (std::error_code ec; std::filesystem::remove_all(path, ec), ec)
         spkg::Warning(
             "failed to remove work directory '{}': {} ({})",
@@ -150,6 +151,7 @@ static void remove_work_directory(const std::filesystem::path &path)
 
 static void remove_cache_directory(const std::filesystem::path &path)
 {
+    spkg::Info("removing cache directory '{}'", path.string());
     if (std::error_code ec; std::filesystem::remove_all(path, ec), ec)
         spkg::Warning(
             "failed to remove cache directory '{}': {} ({})",
@@ -274,7 +276,8 @@ static int exec(
         dup2(pipes[1], STDOUT_FILENO);
         close(pipes[1]);
 
-        chdir(dir.c_str());
+        if (auto error = chdir(dir.c_str()))
+            _exit(error);
 
         for (auto &[key, val] : envs)
             setenv(key.c_str(), val.c_str(), 1);
@@ -297,7 +300,10 @@ static int exec(
     {
         if (streams.empty())
         {
-            write(STDOUT_FILENO, buffer, n);
+            if (auto count = write(STDOUT_FILENO, buffer, n); count < 0)
+                spkg::Warning("failed to write to stdout ({})", count);
+            else if (count != n)
+                spkg::Warning("failed to write full buffer to stdout");
             continue;
         }
 
@@ -520,7 +526,7 @@ static int execute_steps(
 
             if (!step.Persist.empty())
             {
-                spkg::Info("restoring persisted step {}", step.Id);
+                spkg::Info("restoring step '{}'", step.Id);
                 for (auto key : step.Persist)
                 {
                     if (key.front() == '.')
@@ -577,14 +583,14 @@ static int execute_steps(
         {
             if (step_has_cache)
             {
-                spkg::Info("restoring step cache from '{}'", step_cache_dir.string());
+                spkg::Info("restoring cache from '{}'", step_cache_dir.string());
                 if (const auto error = copy_cache(step_cache_dir, step_work_dir, step.Cache))
                     return error;
             }
 
             if (step_manifest_exists)
             {
-                spkg::Info("restoring step manifest from '{}'", step_manifest.string());
+                spkg::Info("restoring manifest from '{}'", step_manifest.string());
                 if (const auto error = read_map_manifest(step_manifest, context.Stack[frame_index]))
                     return error;
             }
@@ -605,10 +611,10 @@ static int execute_steps(
 
         if (!step_cache_exists)
         {
-            spkg::Info("creating step cache directory '{}'", step_cache_dir.string());
+            spkg::Info("creating cache directory '{}'", step_cache_dir.string());
             if (std::error_code ec; std::filesystem::create_directories(step_cache_dir, ec), ec)
                 return spkg::Error(
-                    "failed to create step cache directory '{}': {} ({})",
+                    "failed to create cache directory '{}': {} ({})",
                     step_cache_dir.string(),
                     ec.message(),
                     ec.value());
@@ -616,7 +622,7 @@ static int execute_steps(
 
         if (step_has_cache)
         {
-            spkg::Info("saving step cache to '{}'", step_cache_dir.string());
+            spkg::Info("saving cache to '{}'", step_cache_dir.string());
             if (const auto error = copy_cache(step_work_dir, step_cache_dir, step.Cache))
             {
                 remove_cache_directory(step_cache_dir);
@@ -624,7 +630,7 @@ static int execute_steps(
             }
         }
 
-        spkg::Info("saving step manifest to '{}'", step_manifest.string());
+        spkg::Info("saving manifest to '{}'", step_manifest.string());
         if (const auto error = write_map_manifest(step_manifest, context.Stack[frame_index]))
         {
             remove_cache_directory(step_cache_dir);
@@ -635,7 +641,7 @@ static int execute_steps(
         {
             auto &frame = context.Stack[frame_index];
 
-            spkg::Info("saving persisted step {}", step.Id);
+            spkg::Info("saving step '{}'", step.Id);
             for (auto key : step.Persist)
             {
                 if (key.front() == '.')
@@ -726,33 +732,25 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
 {
     Package package;
     if (!FindPackage(config, arg, package))
-        return Error("no package for specifier '{}'", arg);
+        return Error("no package '{}'", arg);
 
+    auto package_id = package.Id;
+    auto fragment_id = arg.Fragment.value_or("default");
+    
     Fragment *p_fragment;
-    if (arg.HasFragment())
-    {
-        if (auto it = package.Fragments.find(arg.GetFragmentOr()); it != package.Fragments.end())
-            p_fragment = &it->second;
-        else
-            return Error("no fragment for specifier '{}'", arg);
-    }
-    else
-    {
+    if (fragment_id == "default")
         p_fragment = &package.Default;
-    }
+    else if (auto it = package.Fragments.find(fragment_id); it != package.Fragments.end())
+        p_fragment = &it->second;
+    else
+        return Error("no fragment '{}' in package '{}'", arg.Fragment.value_or("default"), arg.Id);
 
     auto &fragment = *p_fragment;
 
-    auto package_id = package.Id;
-    auto fragment_id = arg.GetFragmentOr("default");
-    auto version = arg.GetVersionOr(package.Version == "*" ? "latest" : package.Version);
+    auto work_dir = config.Cache / (package_id + '-' + fragment_id);
+    auto cache_dir = config.Cache / package_id;
 
-    auto cache_name = package_id + '-' + fragment_id + '-' + version;
-
-    auto work_dir = config.Cache / cache_name;
-    auto cache_dir = config.Cache / package_id / version;
-
-    Specifier cache_key(package_id, fragment_id, version);
+    Specifier cache_key(package_id, fragment_id);
 
     Context context
     {
@@ -760,15 +758,17 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         .Remove = remove,
         .Pkg = package,
         .WorkDir = work_dir,
-        .Persist = config.Installed[cache_key],
+        .Persist = {},
         .Stack = {},
     };
-    std::error_code ec;
+
+    if (auto it = config.Installed.find(cache_key); it != config.Installed.end())
+        context.Persist = it->second;
 
     if (!std::filesystem::exists(work_dir))
     {
         Info("creating work directory '{}'", work_dir.string());
-        if (std::filesystem::create_directories(work_dir, ec); ec)
+        if (std::error_code ec; std::filesystem::create_directories(work_dir, ec), ec)
             return Error(
                 "failed to create work directory '{}': {} ({})",
                 work_dir.string(),
@@ -780,10 +780,15 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
     {
         auto &frame = context.Stack.emplace_back();
         frame["package.id"] = package_id;
-        if (package.Version != "*" || arg.HasVersion())
-            frame["package.version"] = version;
         frame["package.name"] = package.Name;
         frame["package.description"] = package.Description;
+
+        for (auto &param : package.Params)
+        {
+            auto key = '@' + param;
+            
+            // TODO: frame[key] = params[param];
+        }
     }
     if (auto error = execute_segment(context, package_frame_index, nullptr, cache_dir / "__package__", package.Steps))
     {
@@ -804,12 +809,11 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         return error;
     }
 
-    if (remove)
+    if (remove || context.Persist.empty())
         config.Installed.erase(cache_key);
     else
         config.Installed[cache_key] = std::move(context.Persist);
 
-    Info("removing work directory '{}'", work_dir.string());
     remove_work_directory(work_dir);
     return 0;
 }

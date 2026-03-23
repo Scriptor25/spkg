@@ -247,10 +247,11 @@ bool from_json(const json::Node &node, spkg::Package &value)
     auto ok = true;
 
     ok &= from_json(object_node["id"], value.Id);
-    ok &= from_json(object_node["version"], value.Version);
 
     ok &= from_json_opt(object_node["name"], value.Name);
     ok &= from_json_opt(object_node["description"], value.Description);
+
+    ok &= from_json_opt(object_node["params"], value.Params);
 
     ok &= from_json_opt(object_node["env"], value.Env);
 

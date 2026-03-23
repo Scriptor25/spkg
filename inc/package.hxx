@@ -68,11 +68,14 @@ namespace spkg
     
     struct Package
     {
+        bool GetFragment(std::string id, Fragment &fragment) const;
+
         std::string Id;
-        std::string Version;
 
         std::string Name;
         std::string Description;
+
+        std::set<std::string> Params;
 
         std::map<std::string, std::string> Env;
 
@@ -99,7 +102,7 @@ struct std::formatter<spkg::Command> : std::formatter<std::string>
         {
             if (it != command.Args.begin())
                 str += ' ';
-            str += "'" + *it + "'";
+            str += '\'' + *it + '\'';
         }
         return std::formatter<std::string>::format(str, context);
     }

@@ -3,11 +3,7 @@
 
 int spkg::Remove(Config &config, Specifier arg)
 {
-    auto package_id = arg.Id;
-    auto fragment_id = arg.GetFragmentOr("default");
-    auto version = arg.GetVersionOr("latest");
-
-    Specifier cache_key(package_id, fragment_id, version);
+    Specifier cache_key(arg.Id, arg.Fragment.value_or("default"));
     if (!config.Installed.contains(cache_key))
         return Error("'{}' is not installed", arg);
 

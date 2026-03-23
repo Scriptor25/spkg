@@ -10,21 +10,12 @@ namespace spkg
     {
         Specifier() = default;
         Specifier(const std::string &s);
-        Specifier(std::string id, std::string fragment, std::string version);
+        Specifier(std::string id, std::optional<std::string> fragment);
 
         operator std::string() const;
 
-        Specifier Normalized() const;
-
-        bool HasFragment() const;
-        bool HasVersion() const;
-
-        std::string GetFragmentOr(std::string default_value = {}) const;
-        std::string GetVersionOr(std::string default_value = {}) const;
-
         std::string Id;
         std::optional<std::string> Fragment;
-        std::optional<std::string> Version;
     };
 }
 

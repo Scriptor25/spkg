@@ -9,10 +9,7 @@ bool spkg::FindPackage(const Config &config, const Specifier &specifier, Package
         config,
         [&](Package &&value)
         {
-            const auto found = value.Id == specifier.Id
-                               && (!specifier.HasVersion()
-                                   || value.Version == "*"
-                                   || value.Version == specifier.Version);
+            const auto found = value.Id == specifier.Id;
             package = std::forward<Package>(value);
             return found;
         });
