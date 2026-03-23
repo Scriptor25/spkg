@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include <spkg.hxx>
 
 int spkg::Help()

@@ -1,6 +1,7 @@
+#include <package.hxx>
 #include <spkg.hxx>
 
-static void parse_command_line(const std::string &line, std::vector<std::string> &command)
+static void parse_args(const std::string &line, std::vector<std::string> &command)
 {
     std::string buffer;
 
@@ -95,11 +96,46 @@ static void parse_command_line(const std::string &line, std::vector<std::string>
 }
 
 template<>
+bool from_json(const json::Node &node, spkg::CaptureDef &value)
+{
+    if (from_json(node, value.Name))
+        return true;
+
+    if (!json::IsObject(node))
+        return false;
+
+    auto &object_node = json::AsObject(node);
+
+    auto ok = true;
+
+    ok &= from_json(object_node["name"], value.Name);
+    ok &= from_json_opt(object_node["array"], value.Array);
+
+    return ok;
+}
+
+template<>
+bool from_json(const json::Node &node, spkg::ForEachDef &value)
+{
+    if (!json::IsObject(node))
+        return false;
+
+    auto &object_node = json::AsObject(node);
+
+    auto ok = true;
+
+    ok &= from_json(object_node["var"], value.Var);
+    ok &= from_json(object_node["of"], value.Of);
+
+    return ok;
+}
+
+template<>
 bool from_json(const json::Node &node, spkg::Command &value)
 {
     if (std::string line; node >> line)
     {
-        parse_command_line(line, value.Args);
+        parse_args(line, value.Args);
         return true;
     }
 
@@ -111,12 +147,14 @@ bool from_json(const json::Node &node, spkg::Command &value)
     auto ok = true;
 
     if (std::string line; from_json(object_node["args"], line))
-        parse_command_line(line, value.Args);
+        parse_args(line, value.Args);
     else
         ok &= from_json(object_node["args"], value.Args);
 
-    ok &= from_json_opt(object_node["capture"], value.Capture);
-    ok &= from_json_opt(object_node["output"], value.Output);
+    ok &= from_json(object_node["capture"], value.Capture);
+    ok &= from_json(object_node["output"], value.Output);
+
+    ok &= from_json(object_node["foreach"], value.ForEach);
 
     ok &= from_json_opt(object_node["dir"], value.Dir);
     ok &= from_json_opt(object_node["env"], value.Env);
@@ -149,53 +187,6 @@ bool from_json(const json::Node &node, std::vector<spkg::Command> &value)
 }
 
 template<>
-bool from_json(const json::Node &node, spkg::FileReferenceType &value)
-{
-    static const std::map<std::string, spkg::FileReferenceType> map
-    {
-        { "file", spkg::FileReferenceType::file },
-        { "manifest", spkg::FileReferenceType::manifest },
-    };
-
-    if (std::string s; from_json(node, s))
-    {
-        if (const auto it = map.find(s); it != map.end())
-        {
-            value = map.at(s);
-            return true;
-        }
-        return false;
-    }
-
-    return false;
-}
-
-template<>
-bool from_json(const json::Node &node, spkg::FileReference &value)
-{
-    if (std::string path; from_json(node, path))
-    {
-        value = {
-            .Type = spkg::FileReferenceType::file,
-            .Path = std::move(path),
-        };
-        return true;
-    }
-
-    if (!json::IsObject(node))
-        return false;
-
-    auto &object_node = json::AsObject(node);
-
-    auto ok = true;
-
-    ok &= from_json(object_node["type"], value.Type);
-    ok &= from_json(object_node["path"], value.Path);
-
-    return ok;
-}
-
-template<>
 bool from_json<spkg::Step>(const json::Node &node, spkg::Step &value)
 {
     if (!json::IsObject(node))
@@ -211,7 +202,10 @@ bool from_json<spkg::Step>(const json::Node &node, spkg::Step &value)
     ok &= from_json_opt(object_node["env"], value.Env);
 
     ok &= from_json_opt(object_node["cache"], value.Cache);
+    ok &= from_json_opt(object_node["persist"], value.Persist);
+
     ok &= from_json_opt(object_node["once"], value.Once);
+    ok &= from_json_opt(object_node["remove"], value.Remove);
 
     ok &= from_json_opt(object_node["run"], value.Run);
 
@@ -221,6 +215,9 @@ bool from_json<spkg::Step>(const json::Node &node, spkg::Step &value)
 template<>
 bool from_json(const json::Node &node, spkg::Fragment &value)
 {
+    if (from_json(node, value.Steps))
+        return true;
+
     if (!json::IsObject(node))
         return false;
 
@@ -235,8 +232,6 @@ bool from_json(const json::Node &node, spkg::Fragment &value)
     ok &= from_json_opt(object_node["env"], value.Env);
 
     ok &= from_json_opt(object_node["steps"], value.Steps);
-
-    ok &= from_json_opt(object_node["files"], value.Files);
 
     return ok;
 }
@@ -259,7 +254,7 @@ bool from_json(const json::Node &node, spkg::Package &value)
 
     ok &= from_json_opt(object_node["env"], value.Env);
 
-    ok &= from_json_opt(object_node["setup"], value.Setup);
+    ok &= from_json_opt(object_node["steps"], value.Steps);
 
     ok &= from_json(object_node["default"], value.Default);
     ok &= from_json_opt(object_node["fragments"], value.Fragments);

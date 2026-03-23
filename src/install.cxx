@@ -1,7 +1,12 @@
+#include <fstream>
+#include <ranges>
+#include <utility>
+
 #include <unistd.h>
 #include <sys/wait.h>
 
-#include <ranges>
+#include <context.hxx>
+#include <log.hxx>
 #include <spkg.hxx>
 
 static int copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
@@ -314,15 +319,14 @@ static int exec(
     return -1;
 }
 
-static int exec(
+static int execute_command_once(
     spkg::Context &context,
-    const std::vector<std::string> &command_args,
-    const std::string &command_capture,
-    const std::string &command_output,
+    const std::string &key_base,
+    const spkg::Command &command,
     const std::filesystem::path &work_dir,
     const std::map<std::string, std::string> &envs)
 {
-    auto args = command_args;
+    auto args = command.Args;
     for (auto &arg : args)
     {
         std::set<std::string> keys;
@@ -341,6 +345,9 @@ static int exec(
                 key = key.substr(0, p);
             }
 
+            if (key.front() == '.')
+                key = key_base + key;
+
             if (keys.contains(key))
             {
                 spkg::Warning("recursive variable expansion for key '{}'", key);
@@ -350,47 +357,120 @@ static int exec(
 
             keys.insert(key);
 
-            auto replaced = false;
-            for (auto &frame : std::ranges::reverse_view(context.Stack))
-                if (auto it = frame.find(key); it != frame.end())
-                {
-                    arg.replace(pos, end - pos + 1, it->second);
-                    replaced = true;
-                    break;
-                }
-            if (!replaced)
+            if (std::string value; context.GetVariable(key, value))
+                arg.replace(pos, end - pos + 1, value);
+            else
+            {
                 arg.replace(pos, end - pos + 1, default_value);
+                if (default_value.empty())
+                    spkg::Warning("variable '{}' is not defined", key);
+            }
         }
     }
 
     std::vector<std::ostream *> streams;
 
-    std::unique_ptr<std::ostringstream> capture_stream;
-    if (!command_capture.empty())
+    std::unique_ptr<std::stringstream> capture_stream;
+    if (command.Capture)
     {
-        capture_stream = std::make_unique<std::ostringstream>();
+        capture_stream = std::make_unique<std::stringstream>();
         streams.push_back(capture_stream.get());
     }
 
     std::unique_ptr<std::ofstream> output_stream;
-    if (!command_output.empty())
+    if (command.Output)
     {
-        output_stream = std::make_unique<std::ofstream>(work_dir / command_output);
+        output_stream = std::make_unique<std::ofstream>(work_dir / *command.Output);
         streams.push_back(output_stream.get());
     }
 
-    const auto code = exec(streams, work_dir, args[0], args, envs);
+    const auto result = exec(streams, work_dir, args[0], args, envs);
 
-    if (!command_capture.empty())
+    if (command.Capture)
     {
-        auto &capture = context.Stack.back()[command_capture];
-        capture = rtrim(capture_stream->str());
+        auto &frame = context.Stack.back();
+        
+        auto key = command.Capture->Name;
+        if (key.front() == '.')
+            key = key_base + key;
+
+        if (command.Capture->Array)
+        {
+            std::size_t index = 0;
+            for (std::string line; std::getline(*capture_stream, line);)
+            {
+                line = trim(line);
+                if (line.empty())
+                    continue;
+
+                frame[key + '[' + std::to_string(index++) + ']'] = std::move(line);
+            }
+            
+            frame[key + ".size"] = std::to_string(index);
+        }
+        else
+            frame[key] = rtrim(capture_stream->str());
     }
 
-    return code;
+    return result;
 }
 
-static int exec(
+static int execute_command(
+    spkg::Context &context,
+    const std::string &key_base,
+    const spkg::Command &command,
+    const std::filesystem::path &work_dir,
+    const std::map<std::string, std::string> &envs)
+{
+    if (command.ForEach)
+    {
+        auto &frame = context.Stack.back();
+
+        auto var = command.ForEach->Var;
+        if (var.front() == '.')
+            var = key_base + var;
+
+        auto of = command.ForEach->Of;
+        if (of.front() == '.')
+            of = key_base + of;
+        
+        if (std::string value; context.GetVariable(of + ".size", value))
+        {
+            std::size_t size = std::stoull(value);
+            for (std::size_t i = 0; i < size; ++i)
+            {
+                auto key = of + '[' + std::to_string(i) + ']';
+                if (std::string value; context.GetVariable(key, value))
+                    frame[var] = std::move(value);
+                else
+                {
+                    frame.erase(var);
+                    spkg::Warning("variable '{}' is not defined", key);
+                }
+                    
+                if (auto result = execute_command_once(context, key_base, command, work_dir, envs))
+                    return result;
+            }
+
+            return 0;
+        }
+
+        if (std::string value; context.GetVariable(of, value))
+        {
+            frame[var] = std::move(value);
+            spkg::Warning("variable '{}' is not iterable", of);
+        }
+        else
+        {
+            frame.erase(var);
+            spkg::Warning("variable '{}' is not defined", of);
+        }
+    }
+
+    return execute_command_once(context, key_base, command, work_dir, envs);
+}
+
+static int execute_command(
     spkg::Context &context,
     const spkg::Package &package,
     const spkg::Fragment *fragment,
@@ -411,36 +491,77 @@ static int exec(
     else
         dir = work_dir / step.Dir / command.Dir;
 
-    return exec(
-        context,
-        command.Args,
-        command.Capture,
-        command.Output,
-        dir,
-        envs);
+    return execute_command(context, step.Id, command, dir, envs);
 }
 
 static int execute_steps(
     spkg::Context &context,
     const spkg::Fragment *fragment,
     const std::filesystem::path &base_cache_dir,
-    const std::vector<spkg::Step> &steps)
+    const std::vector<spkg::Step> &steps,
+    bool &any)
 {
+    const auto use_cache = context.UseCache;
+    const auto remove = context.Remove;
+
     const auto &package = context.Pkg;
     const auto &work_dir = context.WorkDir;
 
     const auto fragment_work_dir = fragment ? work_dir / fragment->Dir : work_dir;
 
-    std::error_code ec;
+    any = false;
 
     for (auto &step : steps)
     {
         const auto frame_index = context.Stack.size();
         {
             auto &frame = context.Stack.emplace_back();
-            frame["step.id"] = step.Id;
-            frame["step.dir"] = step.Dir;
+            frame[step.Id + ".dir"] = step.Dir;
+
+            if (!step.Persist.empty())
+            {
+                spkg::Info("restoring persisted step {}", step.Id);
+                for (auto key : step.Persist)
+                {
+                    if (key.front() == '.')
+                        key = step.Id + key;
+
+                    if (auto it = context.Persist.find(key + ".size"); it != context.Persist.end())
+                    {
+                        frame[key + ".size"] = it->second;
+
+                        std::size_t size = std::stoull(it->second);
+                        for (std::size_t i = 0; i < size; ++i)
+                        {
+                            auto index = key + '[' + std::to_string(i) + ']';
+
+                            if (auto it = context.Persist.find(index); it != context.Persist.end())
+                            {
+                                frame[index] = it->second;
+                                continue;
+                            }
+
+                            spkg::Warning("variable '{}' is not defined", index);
+                        }
+
+                        continue;
+                    }
+
+                    if (auto it = context.Persist.find(key); it != context.Persist.end())
+                    {
+                        frame[key] = it->second;
+                        continue;
+                    }
+
+                    spkg::Warning("variable '{}' is not defined", key);
+                }
+            }
         }
+
+        if (step.Remove != remove)
+            continue;
+
+        any = true;
 
         auto step_work_dir = fragment_work_dir / step.Dir;
 
@@ -452,7 +573,7 @@ static int execute_steps(
 
         const auto step_has_cache = !step.Cache.empty();
 
-        if (step_cache_exists)
+        if (use_cache && step_cache_exists)
         {
             if (step_has_cache)
             {
@@ -469,39 +590,85 @@ static int execute_steps(
             }
         }
 
-        if (!step_manifest_exists || (!step_cache_exists && step_has_cache) || !step.Once)
+        auto cached = use_cache
+            && step_manifest_exists
+            && (step_cache_exists || !step_has_cache)
+            && step.Once;
+
+        if (cached)
+            continue;
+
+        spkg::Info("executing step {}", step.Id);
+        for (auto &command : step.Run)
+            if (auto result = execute_command(context, package, fragment, step, command, work_dir))
+                return Error("command '{}' exited with non-zero result {}", command, result);
+
+        if (!step_cache_exists)
         {
-            spkg::Info("executing step {}", step.Id);
-            for (auto &command : step.Run)
-                if (auto code = exec(context, package, fragment, step, command, work_dir))
-                    return Error("command '{}' exited with non-zero code {}", command, code);
+            spkg::Info("creating step cache directory '{}'", step_cache_dir.string());
+            if (std::error_code ec; std::filesystem::create_directories(step_cache_dir, ec), ec)
+                return spkg::Error(
+                    "failed to create step cache directory '{}': {} ({})",
+                    step_cache_dir.string(),
+                    ec.message(),
+                    ec.value());
+        }
 
-            if (!step_cache_exists)
-            {
-                spkg::Info("creating step cache directory '{}'", step_cache_dir.string());
-                if (std::filesystem::create_directories(step_cache_dir, ec); ec)
-                    return spkg::Error(
-                        "failed to create step cache directory '{}': {} ({})",
-                        step_cache_dir.string(),
-                        ec.message(),
-                        ec.value());
-            }
-
-            if (step_has_cache)
-            {
-                spkg::Info("saving step cache to '{}'", step_cache_dir.string());
-                if (const auto error = copy_cache(step_work_dir, step_cache_dir, step.Cache))
-                {
-                    remove_cache_directory(step_cache_dir);
-                    return error;
-                }
-            }
-
-            spkg::Info("saving step manifest to '{}'", step_manifest.string());
-            if (const auto error = write_map_manifest(step_manifest, context.Stack[frame_index]))
+        if (step_has_cache)
+        {
+            spkg::Info("saving step cache to '{}'", step_cache_dir.string());
+            if (const auto error = copy_cache(step_work_dir, step_cache_dir, step.Cache))
             {
                 remove_cache_directory(step_cache_dir);
                 return error;
+            }
+        }
+
+        spkg::Info("saving step manifest to '{}'", step_manifest.string());
+        if (const auto error = write_map_manifest(step_manifest, context.Stack[frame_index]))
+        {
+            remove_cache_directory(step_cache_dir);
+            return error;
+        }
+
+        if (!step.Persist.empty())
+        {
+            auto &frame = context.Stack[frame_index];
+
+            spkg::Info("saving persisted step {}", step.Id);
+            for (auto key : step.Persist)
+            {
+                if (key.front() == '.')
+                    key = step.Id + key;
+
+                if (auto it = frame.find(key + ".size"); it != frame.end())
+                {
+                    context.Persist[key + ".size"] = it->second;
+
+                    std::size_t size = std::stoull(it->second);
+                    for (std::size_t i = 0; i < size; ++i)
+                    {
+                        auto index = key + '[' + std::to_string(i) + ']';
+
+                        if (auto it = frame.find(index); it != frame.end())
+                        {
+                            context.Persist[index] = it->second;
+                            continue;
+                        }
+
+                        spkg::Warning("variable '{}' is not defined", index);
+                    }
+
+                    continue;
+                }
+
+                if (auto it = frame.find(key); it != frame.end())
+                {
+                    context.Persist[key] = it->second;
+                    continue;
+                }
+
+                spkg::Warning("variable '{}' is not defined", key);
             }
         }
     }
@@ -516,17 +683,23 @@ static int execute_segment(
     const std::filesystem::path &base_cache_dir,
     const std::vector<spkg::Step> &steps)
 {
+    const auto use_cache = context.UseCache;
+
     const auto manifest = base_cache_dir / "__manifest__";
 
-    if (std::filesystem::exists(manifest))
+    if (use_cache && std::filesystem::exists(manifest))
     {
         spkg::Info("restoring manifest from '{}'", manifest.string());
         if (const auto error = read_map_manifest(manifest, context.Stack[frame_index]))
             return error;
     }
 
-    if (const auto error = execute_steps(context, fragment, base_cache_dir, steps))
+    bool any;
+    if (const auto error = execute_steps(context, fragment, base_cache_dir, steps, any))
         return error;
+
+    if (!any)
+        return 0;
 
     if (!std::filesystem::exists(base_cache_dir))
     {
@@ -549,41 +722,45 @@ static int execute_segment(
     return 0;
 }
 
-int spkg::Install(Config &config, const std::string &arg)
+int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
 {
-    const Specifier specifier(arg);
-
     Package package;
-    if (!FindPackage(config, specifier, package))
-        return Error("no package '{}:{}'", specifier.Id, specifier.Version);
+    if (!FindPackage(config, arg, package))
+        return Error("no package for specifier '{}'", arg);
 
-    auto p_fragment = &package.Default;
-    if (!specifier.Fragment.empty())
+    Fragment *p_fragment;
+    if (arg.HasFragment())
     {
-        if (auto it = package.Fragments.find(specifier.Fragment); it == package.Fragments.end())
-            return Error(
-                "no fragment '{}' in package '{}:{}'",
-                specifier.Fragment,
-                specifier.Id,
-                specifier.Version);
-        else
+        if (auto it = package.Fragments.find(arg.GetFragmentOr()); it != package.Fragments.end())
             p_fragment = &it->second;
+        else
+            return Error("no fragment for specifier '{}'", arg);
     }
+    else
+    {
+        p_fragment = &package.Default;
+    }
+
     auto &fragment = *p_fragment;
 
     auto package_id = package.Id;
-    auto fragment_id = specifier.Fragment.empty() ? "default" : specifier.Fragment;
-    auto version = package.Version == "*" ? specifier.Version.empty() ? "latest" : specifier.Version : package.Version;
+    auto fragment_id = arg.GetFragmentOr("default");
+    auto version = arg.GetVersionOr(package.Version == "*" ? "latest" : package.Version);
 
-    auto cache_key = package_id + '-' + fragment_id + '-' + version;
+    auto cache_name = package_id + '-' + fragment_id + '-' + version;
 
-    auto work_dir = config.Cache / cache_key;
+    auto work_dir = config.Cache / cache_name;
     auto cache_dir = config.Cache / package_id / version;
+
+    Specifier cache_key(package_id, fragment_id, version);
 
     Context context
     {
+        .UseCache = use_cache,
+        .Remove = remove,
         .Pkg = package,
         .WorkDir = work_dir,
+        .Persist = config.Installed[cache_key],
         .Stack = {},
     };
     std::error_code ec;
@@ -603,12 +780,12 @@ int spkg::Install(Config &config, const std::string &arg)
     {
         auto &frame = context.Stack.emplace_back();
         frame["package.id"] = package_id;
-        if (package.Version != "*" || !specifier.Version.empty())
+        if (package.Version != "*" || arg.HasVersion())
             frame["package.version"] = version;
         frame["package.name"] = package.Name;
         frame["package.description"] = package.Description;
     }
-    if (auto error = execute_segment(context, package_frame_index, nullptr, cache_dir / "__package__", package.Setup))
+    if (auto error = execute_segment(context, package_frame_index, nullptr, cache_dir / "__package__", package.Steps))
     {
         remove_work_directory(work_dir);
         return error;
@@ -627,22 +804,10 @@ int spkg::Install(Config &config, const std::string &arg)
         return error;
     }
 
-    auto &installed = config.Installed[cache_key];
-    for (auto &[type, path] : fragment.Files)
-        switch (type)
-        {
-        case FileReferenceType::file:
-            installed.insert(path);
-            break;
-        case FileReferenceType::manifest:
-        {
-            std::vector<std::string> manifest;
-            if (auto error = read_manifest(work_dir / fragment.Dir / path, manifest))
-                return error;
-            installed.insert(manifest.begin(), manifest.end());
-            break;
-        }
-        }
+    if (remove)
+        config.Installed.erase(cache_key);
+    else
+        config.Installed[cache_key] = std::move(context.Persist);
 
     Info("removing work directory '{}'", work_dir.string());
     remove_work_directory(work_dir);

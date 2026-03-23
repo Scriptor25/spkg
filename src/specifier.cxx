@@ -1,4 +1,4 @@
-#include <spkg.hxx>
+#include <specifier.hxx>
 
 spkg::Specifier::Specifier(const std::string &s)
 {
@@ -22,4 +22,44 @@ spkg::Specifier::Specifier(const std::string &s)
 
     if (version_begin != std::string::npos)
         Version = s.substr(version_begin + 1);
+}
+
+spkg::Specifier::Specifier(std::string id, std::string fragment, std::string version)
+    : Id(id), Fragment(fragment), Version(version)
+{
+}
+
+spkg::Specifier::operator std::string() const
+{
+    std::string s = Id;
+    if (Fragment.has_value())
+        s += '/' + Fragment.value();
+    if (Version.has_value())
+        s += ':' + Version.value();
+    return s;
+}
+
+spkg::Specifier spkg::Specifier::Normalized() const
+{
+    return Specifier(Id, Fragment.value_or("default"), Version.value_or("latest"));
+}
+
+bool spkg::Specifier::HasFragment() const
+{
+    return Fragment.has_value();
+}
+
+bool spkg::Specifier::HasVersion() const
+{
+    return Version.has_value();
+}
+
+std::string spkg::Specifier::GetFragmentOr(std::string default_value) const
+{
+    return Fragment.value_or(default_value);
+}
+
+std::string spkg::Specifier::GetVersionOr(std::string default_value) const
+{
+    return Version.value_or(default_value);
 }

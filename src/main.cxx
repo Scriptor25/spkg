@@ -1,3 +1,6 @@
+#include <fstream>
+
+#include <log.hxx>
 #include <spkg.hxx>
 
 static spkg::Config get_config()
@@ -35,7 +38,7 @@ static int set_config(const spkg::Config &value)
 
     json::Node json;
     to_json(json, value);
-    stream << json;
+    stream << json::pretty << json;
 
     return 0;
 }
@@ -58,7 +61,7 @@ int main(const int argc, const char **argv)
     else if (args[0] == "install" || args[0] == "i")
     {
         if (args.size() == 2)
-            code = Install(config, args[1]);
+            code = Install(config, args[1], true, false);
     }
     else if (args[0] == "remove" || args[0] == "r")
     {

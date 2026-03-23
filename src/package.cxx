@@ -1,19 +1,7 @@
-#include <spkg.hxx>
+#include <fstream>
 
-std::ostream &spkg::operator<<(std::ostream &stream, const Command &command)
-{
-    if (!command.Dir.empty())
-        stream << "[" << command.Dir << "] ";
-    for (auto &[key, val] : command.Env)
-        stream << key << "=" << val << " ";
-    for (auto it = command.Args.begin(); it != command.Args.end(); ++it)
-    {
-        if (it != command.Args.begin())
-            stream << ' ';
-        stream << "'" << *it << "'";
-    }
-    return stream;
-}
+#include <log.hxx>
+#include <package.hxx>
 
 bool spkg::FindPackage(const Config &config, const Specifier &specifier, Package &package)
 {
@@ -22,7 +10,7 @@ bool spkg::FindPackage(const Config &config, const Specifier &specifier, Package
         [&](Package &&value)
         {
             const auto found = value.Id == specifier.Id
-                               && (specifier.Version.empty()
+                               && (!specifier.HasVersion()
                                    || value.Version == "*"
                                    || value.Version == specifier.Version);
             package = std::forward<Package>(value);
