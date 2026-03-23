@@ -2,7 +2,7 @@
 
 spkg::Specifier::Specifier(const std::string &s)
 {
-    if (auto pos = s.find(':'); pos != std::string::npos)
+    if (const auto pos = s.find(':'); pos != std::string::npos)
     {
         Id = s.substr(0, pos);
         Fragment = s.substr(pos + 1);
@@ -14,7 +14,8 @@ spkg::Specifier::Specifier(const std::string &s)
 }
 
 spkg::Specifier::Specifier(std::string id, std::optional<std::string> fragment)
-    : Id(id), Fragment(fragment)
+    : Id(std::move(id)),
+      Fragment(std::move(fragment))
 {
 }
 

@@ -352,7 +352,7 @@ static int execute_command_once(
             }
 
             if (key.front() == '.')
-                key = key_base + key;
+                key = key_base + std::move(key);
 
             if (keys.contains(key))
             {
@@ -395,7 +395,7 @@ static int execute_command_once(
     if (command.Capture)
     {
         auto &frame = context.Stack.back();
-        
+
         auto key = command.Capture->Name;
         if (key.front() == '.')
             key = key_base + key;
@@ -411,7 +411,7 @@ static int execute_command_once(
 
                 frame[key + '[' + std::to_string(index++) + ']'] = std::move(line);
             }
-            
+
             frame[key + ".size"] = std::to_string(index);
         }
         else
@@ -439,10 +439,11 @@ static int execute_command(
         auto of = command.ForEach->Of;
         if (of.front() == '.')
             of = key_base + of;
-        
-        if (std::string value; context.GetVariable(of + ".size", value))
+
+        if (std::string size_value; context.GetVariable(of + ".size", size_value))
         {
-            std::size_t size = std::stoull(value);
+            const std::size_t size = std::stoull(size_value);
+
             for (std::size_t i = 0; i < size; ++i)
             {
                 auto key = of + '[' + std::to_string(i) + ']';
@@ -453,7 +454,7 @@ static int execute_command(
                     frame.erase(var);
                     spkg::Warning("variable '{}' is not defined", key);
                 }
-                    
+
                 if (auto result = execute_command_once(context, key_base, command, work_dir, envs))
                     return result;
             }
@@ -530,7 +531,7 @@ static int execute_steps(
                 for (auto key : step.Persist)
                 {
                     if (key.front() == '.')
-                        key = step.Id + key;
+                        key = step.Id + std::move(key);
 
                     if (auto it = context.Persist.find(key + ".size"); it != context.Persist.end())
                     {
@@ -597,9 +598,9 @@ static int execute_steps(
         }
 
         auto cached = use_cache
-            && step_manifest_exists
-            && (step_cache_exists || !step_has_cache)
-            && step.Once;
+                      && step_manifest_exists
+                      && (step_cache_exists || !step_has_cache)
+                      && step.Once;
 
         if (cached)
             continue;
@@ -645,13 +646,13 @@ static int execute_steps(
             for (auto key : step.Persist)
             {
                 if (key.front() == '.')
-                    key = step.Id + key;
+                    key = step.Id + std::move(key);
 
-                if (auto it = frame.find(key + ".size"); it != frame.end())
+                if (auto size_it = frame.find(key + ".size"); size_it != frame.end())
                 {
-                    context.Persist[key + ".size"] = it->second;
+                    context.Persist[key + ".size"] = size_it->second;
 
-                    std::size_t size = std::stoull(it->second);
+                    std::size_t size = std::stoull(size_it->second);
                     for (std::size_t i = 0; i < size; ++i)
                     {
                         auto index = key + '[' + std::to_string(i) + ']';
@@ -736,7 +737,7 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
 
     auto package_id = package.Id;
     auto fragment_id = arg.Fragment.value_or("default");
-    
+
     Fragment *p_fragment;
     if (fragment_id == "default")
         p_fragment = &package.Default;
@@ -786,7 +787,7 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         for (auto &param : package.Params)
         {
             auto key = '@' + param;
-            
+
             // TODO: frame[key] = params[param];
         }
     }

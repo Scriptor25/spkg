@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <json.hxx>
+#include <json/json.hxx>
 
 #include <config.hxx>
 #include <specifier.hxx>
@@ -17,7 +17,7 @@ namespace spkg
     struct CaptureDef
     {
         std::string Name;
-        bool Array;
+        bool Array{};
     };
 
     struct ForEachDef
@@ -49,8 +49,8 @@ namespace spkg
         std::vector<std::string> Cache;
         std::vector<std::string> Persist;
 
-        bool Once;
-        bool Remove;
+        bool Once{};
+        bool Remove{};
 
         std::vector<Command> Run;
     };
@@ -65,7 +65,7 @@ namespace spkg
 
         std::vector<Step> Steps;
     };
-    
+
     struct Package
     {
         bool GetFragment(std::string id, Fragment &fragment) const;

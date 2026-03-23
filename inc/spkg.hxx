@@ -2,7 +2,7 @@
 
 #include <filesystem>
 
-#include <json.hxx>
+#include <json/json.hxx>
 
 #include <config.hxx>
 #include <specifier.hxx>
@@ -13,7 +13,7 @@ namespace spkg
     int List(const Config &config);
     int Install(Config &config, Specifier arg, bool use_cache, bool remove);
     int Remove(Config &config, Specifier arg);
-    int Update(Config &config, std::optional<Specifier> arg = std::nullopt);
+    int Update(Config &config, const std::optional<Specifier> &arg = std::nullopt);
 
     std::filesystem::path GetHomeDir();
     std::filesystem::path GetDefaultPackagesDir();

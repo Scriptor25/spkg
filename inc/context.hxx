@@ -11,7 +11,7 @@ namespace spkg
 {
     struct Context
     {
-        bool GetVariable(std::string key, std::string &value) const;
+        bool GetVariable(const std::string &key, std::string &value) const;
 
         bool UseCache;
         bool Remove;

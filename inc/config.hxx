@@ -4,7 +4,7 @@
 #include <map>
 #include <set>
 
-#include <json.hxx>
+#include <json/json.hxx>
 
 namespace spkg
 {
