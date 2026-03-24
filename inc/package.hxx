@@ -47,7 +47,7 @@ namespace spkg
         std::map<std::string, std::string> Env;
 
         std::vector<std::string> Cache;
-        std::vector<std::string> Persist;
+        std::set<std::string> Persist;
 
         bool Once{};
         bool Remove{};

@@ -501,6 +501,90 @@ static int execute_command(
     return execute_command(context, step.Id, command, dir, envs);
 }
 
+static void restore(
+    const std::set<std::string> &keys,
+    const std::string &key_base,
+    const std::map<std::string, std::string> &values,
+    std::map<std::string, std::string> &frame)
+{
+    for (auto key : keys)
+    {
+        if (key.front() == '.')
+            key = key_base + std::move(key);
+
+        if (auto it = values.find(key + ".size"); it != values.end())
+        {
+            frame[key + ".size"] = it->second;
+
+            std::size_t size = std::stoull(it->second);
+            for (std::size_t i = 0; i < size; ++i)
+            {
+                auto index = key + '[' + std::to_string(i) + ']';
+
+                if (auto it = values.find(index); it != values.end())
+                {
+                    frame[index] = it->second;
+                    continue;
+                }
+
+                spkg::Warning("variable '{}' is not defined", index);
+            }
+
+            continue;
+        }
+
+        if (auto it = values.find(key); it != values.end())
+        {
+            frame[key] = it->second;
+            continue;
+        }
+
+        spkg::Warning("variable '{}' is not defined", key);
+    }
+}
+
+static void save(
+    const std::set<std::string> &keys,
+    const std::string &key_base,
+    std::map<std::string, std::string> &values,
+    const std::map<std::string, std::string> &frame)
+{
+    for (auto key : keys)
+    {
+        if (key.front() == '.')
+            key = key_base + std::move(key);
+
+        if (auto size_it = frame.find(key + ".size"); size_it != frame.end())
+        {
+            values[key + ".size"] = size_it->second;
+
+            std::size_t size = std::stoull(size_it->second);
+            for (std::size_t i = 0; i < size; ++i)
+            {
+                auto index = key + '[' + std::to_string(i) + ']';
+
+                if (auto it = frame.find(index); it != frame.end())
+                {
+                    values[index] = it->second;
+                    continue;
+                }
+
+                spkg::Warning("variable '{}' is not defined", index);
+            }
+
+            continue;
+        }
+
+        if (auto it = frame.find(key); it != frame.end())
+        {
+            values[key] = it->second;
+            continue;
+        }
+
+        spkg::Warning("variable '{}' is not defined", key);
+    }
+}
+
 static int execute_steps(
     spkg::Context &context,
     const spkg::Fragment *fragment,
@@ -525,43 +609,10 @@ static int execute_steps(
             auto &frame = context.Stack.emplace_back();
             frame[step.Id + ".dir"] = step.Dir;
 
-            if (!step.Persist.empty())
+            if ((!use_cache || remove) && !step.Persist.empty())
             {
                 spkg::Info("restoring step '{}'", step.Id);
-                for (auto key : step.Persist)
-                {
-                    if (key.front() == '.')
-                        key = step.Id + std::move(key);
-
-                    if (auto it = context.Persist.find(key + ".size"); it != context.Persist.end())
-                    {
-                        frame[key + ".size"] = it->second;
-
-                        std::size_t size = std::stoull(it->second);
-                        for (std::size_t i = 0; i < size; ++i)
-                        {
-                            auto index = key + '[' + std::to_string(i) + ']';
-
-                            if (auto it = context.Persist.find(index); it != context.Persist.end())
-                            {
-                                frame[index] = it->second;
-                                continue;
-                            }
-
-                            spkg::Warning("variable '{}' is not defined", index);
-                        }
-
-                        continue;
-                    }
-
-                    if (auto it = context.Persist.find(key); it != context.Persist.end())
-                    {
-                        frame[key] = it->second;
-                        continue;
-                    }
-
-                    spkg::Warning("variable '{}' is not defined", key);
-                }
+                restore(step.Persist, step.Id, context.Persist, frame);
             }
         }
 
@@ -643,40 +694,7 @@ static int execute_steps(
             auto &frame = context.Stack[frame_index];
 
             spkg::Info("saving step '{}'", step.Id);
-            for (auto key : step.Persist)
-            {
-                if (key.front() == '.')
-                    key = step.Id + std::move(key);
-
-                if (auto size_it = frame.find(key + ".size"); size_it != frame.end())
-                {
-                    context.Persist[key + ".size"] = size_it->second;
-
-                    std::size_t size = std::stoull(size_it->second);
-                    for (std::size_t i = 0; i < size; ++i)
-                    {
-                        auto index = key + '[' + std::to_string(i) + ']';
-
-                        if (auto it = frame.find(index); it != frame.end())
-                        {
-                            context.Persist[index] = it->second;
-                            continue;
-                        }
-
-                        spkg::Warning("variable '{}' is not defined", index);
-                    }
-
-                    continue;
-                }
-
-                if (auto it = frame.find(key); it != frame.end())
-                {
-                    context.Persist[key] = it->second;
-                    continue;
-                }
-
-                spkg::Warning("variable '{}' is not defined", key);
-            }
+            save(step.Persist, step.Id, context.Persist, frame);
         }
     }
 
