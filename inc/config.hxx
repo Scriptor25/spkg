@@ -1,10 +1,12 @@
 #pragma once
 
+#include <persist.hxx>
+
+#include <json/json.hxx>
+
 #include <filesystem>
 #include <map>
 #include <set>
-
-#include <json/json.hxx>
 
 namespace spkg
 {
@@ -13,7 +15,7 @@ namespace spkg
         std::set<std::filesystem::path> Packages;
         std::filesystem::path Cache;
 
-        std::map<std::string, std::map<std::string, std::string>> Installed;
+        std::map<std::string, PersistMap> Installed;
     };
 }
 

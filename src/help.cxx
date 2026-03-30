@@ -1,6 +1,6 @@
-#include <iostream>
-
 #include <spkg.hxx>
+
+#include <iostream>
 
 int spkg::Help()
 {

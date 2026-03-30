@@ -1,7 +1,7 @@
-#include <iostream>
-
 #include <package.hxx>
 #include <spkg.hxx>
+
+#include <iostream>
 
 int spkg::List(const Config &config)
 {

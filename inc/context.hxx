@@ -1,17 +1,19 @@
 #pragma once
 
-#include <filesystem>
-#include <map>
-#include <string>
-#include <vector>
-
 #include <package.hxx>
+#include <persist.hxx>
+
+#include <json/json.hxx>
+
+#include <filesystem>
+#include <string>
 
 namespace spkg
 {
     struct Context
     {
-        bool GetVariable(const std::string &key, std::string &value) const;
+        bool GetVariable(const std::string &key, PersistEntry &value) const;
+        bool GetVariable(const std::string &key, PersistVal &value) const;
 
         bool UseCache;
         bool Remove;
@@ -19,8 +21,8 @@ namespace spkg
         const Package &Pkg;
         std::filesystem::path WorkDir;
 
-        std::map<std::string, std::string> Persist;
+        PersistMap Persist;
 
-        std::vector<std::map<std::string, std::string>> Stack;
+        std::vector<PersistMap> Stack;
     };
 }

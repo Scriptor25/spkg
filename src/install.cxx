@@ -1,13 +1,14 @@
-#include <fstream>
-#include <ranges>
-#include <utility>
+#include "persist.hxx"
+#include <context.hxx>
+#include <log.hxx>
+#include <spkg.hxx>
 
 #include <unistd.h>
 #include <sys/wait.h>
 
-#include <context.hxx>
-#include <log.hxx>
-#include <spkg.hxx>
+#include <fstream>
+#include <ranges>
+#include <utility>
 
 static int copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
 {
@@ -207,12 +208,13 @@ static int read_manifest(const std::filesystem::path &path, std::vector<std::str
     return 0;
 }
 
-static int read_map_manifest(const std::filesystem::path &path, std::map<std::string, std::string> &manifest)
+static int read_map_manifest(const std::filesystem::path &path, spkg::PersistMap &manifest)
 {
     std::vector<std::string> vec;
     if (const auto error = read_manifest(path, vec))
         return error;
 
+    std::map<std::string, std::string> m;
     for (auto &line : vec)
     {
         const auto pos = line.find('=');
@@ -222,8 +224,32 @@ static int read_map_manifest(const std::filesystem::path &path, std::map<std::st
         auto key = line.substr(0, pos);
         auto val = line.substr(pos + 1);
 
-        manifest[key] = std::move(val);
+        m[key] = std::move(val);
     }
+
+    std::set<std::string> size_keys;
+    for (auto &key : m | std::views::keys)
+        if (key.ends_with(".size"))
+            size_keys.insert(key);
+    
+    for (auto &key : size_keys)
+    {
+        auto size = std::stoull(m[key]);
+        auto base = key.substr(0, key.find_last_of(".size"));
+
+        spkg::PersistVec vec(size);
+        for (std::size_t i = 0; i < size; ++i)
+        {
+            auto index = base + '[' + std::to_string(i) + ']';
+            vec.push_back(std::move(m[index]));
+            m.erase(index);
+        }
+
+        manifest[base] = std::move(vec);
+    }
+
+    for (auto &[key, val] : m)
+        manifest[key] = std::move(val);
 
     return 0;
 }
@@ -246,11 +272,31 @@ static int write_manifest(const std::filesystem::path &path, const std::vector<s
     return 0;
 }
 
-static int write_map_manifest(const std::filesystem::path &path, const std::map<std::string, std::string> &manifest)
+static int write_map_manifest(const std::filesystem::path &path, const spkg::PersistMap &manifest)
 {
     std::vector<std::string> vec;
     for (auto &[key, val] : manifest)
-        vec.push_back(key + '=' + val);
+    {
+        struct
+        {
+            auto operator()(const spkg::PersistVal &val)
+            {
+                vec.push_back(key + '=' + val);
+            }
+
+            auto operator()(const spkg::PersistVec &val)
+            {
+                vec.push_back(key + ".size=" + std::to_string(val.size()));
+                for (std::size_t i = 0; i < val.size(); ++i)
+                    vec.push_back(key + '[' + std::to_string(i) + "]=" + val[i]);
+            }
+
+            const std::string &key;
+            std::vector<std::string> &vec;
+        } visitor { key, vec };
+
+        std::visit(visitor, val);
+    }
 
     return write_manifest(path, vec);
 }
@@ -363,7 +409,7 @@ static int execute_command_once(
 
             keys.insert(key);
 
-            if (std::string value; context.GetVariable(key, value))
+            if (spkg::PersistVal value; context.GetVariable(key, value))
                 arg.replace(pos, end - pos + 1, value);
             else
             {
@@ -402,17 +448,17 @@ static int execute_command_once(
 
         if (command.Capture->Array)
         {
-            std::size_t index = 0;
+            spkg::PersistVec vec;
             for (std::string line; std::getline(*capture_stream, line);)
             {
                 line = trim(line);
                 if (line.empty())
                     continue;
 
-                frame[key + '[' + std::to_string(index++) + ']'] = std::move(line);
+                vec.push_back(std::move(line));
             }
 
-            frame[key + ".size"] = std::to_string(index);
+            frame[key] = std::move(vec);
         }
         else
             frame[key] = rtrim(capture_stream->str());
@@ -440,38 +486,31 @@ static int execute_command(
         if (of.front() == '.')
             of = key_base + of;
 
-        if (std::string size_value; context.GetVariable(of + ".size", size_value))
+        spkg::PersistEntry entry;
+        if (!context.GetVariable(of, entry))
         {
-            const std::size_t size = std::stoull(size_value);
+            frame.erase(var);
+            spkg::Warning("variable '{}' is not defined", of);
+            return 0;
+        }
 
-            for (std::size_t i = 0; i < size; ++i)
+        if (const auto p = std::get_if<spkg::PersistVec>(&entry))
+        {
+            for (const auto &value : *p)
             {
-                auto key = of + '[' + std::to_string(i) + ']';
-                if (std::string value; context.GetVariable(key, value))
-                    frame[var] = std::move(value);
-                else
-                {
-                    frame.erase(var);
-                    spkg::Warning("variable '{}' is not defined", key);
-                }
+                frame[var] = value;
 
-                if (auto result = execute_command_once(context, key_base, command, work_dir, envs))
+                if (const auto result = execute_command_once(context, key_base, command, work_dir, envs))
                     return result;
             }
 
             return 0;
         }
 
-        if (std::string value; context.GetVariable(of, value))
-        {
-            frame[var] = std::move(value);
-            spkg::Warning("variable '{}' is not iterable", of);
-        }
-        else
-        {
-            frame.erase(var);
-            spkg::Warning("variable '{}' is not defined", of);
-        }
+        const auto& value = std::get<spkg::PersistVal>(entry);
+
+        frame[var] = value;
+        spkg::Warning("variable '{}' is not iterable", of);
     }
 
     return execute_command_once(context, key_base, command, work_dir, envs);
@@ -504,34 +543,13 @@ static int execute_command(
 static void restore(
     const std::set<std::string> &keys,
     const std::string &key_base,
-    const std::map<std::string, std::string> &values,
-    std::map<std::string, std::string> &frame)
+    const spkg::PersistMap &values,
+    spkg::PersistMap &frame)
 {
     for (auto key : keys)
     {
         if (key.front() == '.')
             key = key_base + std::move(key);
-
-        if (auto it = values.find(key + ".size"); it != values.end())
-        {
-            frame[key + ".size"] = it->second;
-
-            std::size_t size = std::stoull(it->second);
-            for (std::size_t i = 0; i < size; ++i)
-            {
-                auto index = key + '[' + std::to_string(i) + ']';
-
-                if (auto it = values.find(index); it != values.end())
-                {
-                    frame[index] = it->second;
-                    continue;
-                }
-
-                spkg::Warning("variable '{}' is not defined", index);
-            }
-
-            continue;
-        }
 
         if (auto it = values.find(key); it != values.end())
         {
@@ -546,34 +564,13 @@ static void restore(
 static void save(
     const std::set<std::string> &keys,
     const std::string &key_base,
-    std::map<std::string, std::string> &values,
-    const std::map<std::string, std::string> &frame)
+    spkg::PersistMap &values,
+    const spkg::PersistMap &frame)
 {
     for (auto key : keys)
     {
         if (key.front() == '.')
             key = key_base + std::move(key);
-
-        if (auto size_it = frame.find(key + ".size"); size_it != frame.end())
-        {
-            values[key + ".size"] = size_it->second;
-
-            std::size_t size = std::stoull(size_it->second);
-            for (std::size_t i = 0; i < size; ++i)
-            {
-                auto index = key + '[' + std::to_string(i) + ']';
-
-                if (auto it = frame.find(index); it != frame.end())
-                {
-                    values[index] = it->second;
-                    continue;
-                }
-
-                spkg::Warning("variable '{}' is not defined", index);
-            }
-
-            continue;
-        }
 
         if (auto it = frame.find(key); it != frame.end())
         {

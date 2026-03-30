@@ -1,6 +1,6 @@
-#include <ranges>
-
 #include <spkg.hxx>
+
+#include <ranges>
 
 int spkg::Update(Config &config, const std::optional<Specifier> &arg)
 {

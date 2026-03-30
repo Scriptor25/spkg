@@ -1,16 +1,16 @@
 #pragma once
 
+#include <config.hxx>
+#include <specifier.hxx>
+
+#include <json/json.hxx>
+
 #include <format>
 #include <functional>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
-
-#include <json/json.hxx>
-
-#include <config.hxx>
-#include <specifier.hxx>
 
 namespace spkg
 {

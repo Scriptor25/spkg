@@ -294,3 +294,15 @@ void to_json(json::Node &node, const spkg::Config &value)
 
     node = { std::move(nodes) };
 }
+
+template<>
+bool from_json(const json::Node &node, spkg::PersistEntry &value)
+{
+    return std::visit([&node](auto &value) { return from_json(node, value); }, value);
+}
+
+template<>
+void to_json(json::Node &node, const spkg::PersistEntry &value)
+{
+    std::visit([&node](const auto &value) { return to_json(node, value); }, value);
+}

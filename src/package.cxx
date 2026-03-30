@@ -1,7 +1,7 @@
-#include <fstream>
-
 #include <log.hxx>
 #include <package.hxx>
+
+#include <fstream>
 
 bool spkg::FindPackage(const Config &config, const Specifier &specifier, Package &package)
 {

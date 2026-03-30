@@ -1,7 +1,7 @@
-#include <fstream>
-
 #include <log.hxx>
 #include <spkg.hxx>
+
+#include <fstream>
 
 static spkg::Config get_config()
 {
