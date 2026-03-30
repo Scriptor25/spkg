@@ -748,25 +748,20 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
 {
     Package package;
     if (!FindPackage(config, arg, package))
-        return Error("no package '{}'", arg);
-
-    auto package_id = package.Id;
-    auto fragment_id = arg.Fragment.value_or("default");
+        return Error("no package '{}'", arg.Id);
 
     Fragment *p_fragment;
-    if (fragment_id == "default")
+    if (arg.Fragment == "default")
         p_fragment = &package.Default;
-    else if (auto it = package.Fragments.find(fragment_id); it != package.Fragments.end())
+    else if (auto it = package.Fragments.find(arg.Fragment); it != package.Fragments.end())
         p_fragment = &it->second;
     else
-        return Error("no fragment '{}' in package '{}'", arg.Fragment.value_or("default"), arg.Id);
+        return Error("no fragment '{}' in package '{}'", arg.Fragment, arg.Id);
 
     auto &fragment = *p_fragment;
 
-    auto work_dir = config.Cache / (package_id + '-' + fragment_id);
-    auto cache_dir = config.Cache / package_id;
-
-    Specifier cache_key(package_id, fragment_id);
+    auto work_dir = config.Cache / (arg.Id + '-' + arg.Fragment);
+    auto cache_dir = config.Cache / arg.Id;
 
     Context context
     {
@@ -778,7 +773,7 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         .Stack = {},
     };
 
-    if (auto it = config.Installed.find(cache_key); it != config.Installed.end())
+    if (auto it = config.Installed.find(arg); it != config.Installed.end())
         context.Persist = it->second;
 
     if (!std::filesystem::exists(work_dir))
@@ -795,7 +790,7 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
     auto package_frame_index = context.Stack.size();
     {
         auto &frame = context.Stack.emplace_back();
-        frame["package.id"] = package_id;
+        frame["package.id"] = package.Id;
         frame["package.name"] = package.Name;
         frame["package.description"] = package.Description;
 
@@ -819,16 +814,16 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         frame["fragment.description"] = fragment.Description;
         frame["fragment.dir"] = fragment.Dir;
     }
-    if (auto error = execute_segment(context, fragment_frame_index, &fragment, cache_dir / fragment_id, fragment.Steps))
+    if (auto error = execute_segment(context, fragment_frame_index, &fragment, cache_dir / arg.Fragment, fragment.Steps))
     {
         remove_work_directory(work_dir);
         return error;
     }
 
-    if (remove || context.Persist.empty())
-        config.Installed.erase(cache_key);
+    if (remove)
+        config.Installed.erase(arg);
     else
-        config.Installed[cache_key] = std::move(context.Persist);
+        config.Installed[arg] = std::move(context.Persist);
 
     remove_work_directory(work_dir);
     return 0;

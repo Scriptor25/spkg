@@ -10,10 +10,11 @@ spkg::Specifier::Specifier(const std::string &s)
     else
     {
         Id = s;
+        Fragment = "default";
     }
 }
 
-spkg::Specifier::Specifier(std::string id, std::optional<std::string> fragment)
+spkg::Specifier::Specifier(std::string id, std::string fragment)
     : Id(std::move(id)),
       Fragment(std::move(fragment))
 {
@@ -21,7 +22,5 @@ spkg::Specifier::Specifier(std::string id, std::optional<std::string> fragment)
 
 spkg::Specifier::operator std::string() const
 {
-    if (Fragment)
-        return Id + ':' + *Fragment;
-    return Id;
+    return Id + ':' + Fragment;
 }

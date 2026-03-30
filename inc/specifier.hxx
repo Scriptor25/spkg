@@ -1,7 +1,6 @@
 #pragma once
 
 #include <format>
-#include <optional>
 #include <string>
 
 namespace spkg
@@ -10,12 +9,12 @@ namespace spkg
     {
         Specifier() = default;
         Specifier(const std::string &s);
-        Specifier(std::string id, std::optional<std::string> fragment);
+        Specifier(std::string id, std::string fragment);
 
         operator std::string() const;
 
         std::string Id;
-        std::optional<std::string> Fragment;
+        std::string Fragment;
     };
 }
 

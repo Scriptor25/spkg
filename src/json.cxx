@@ -298,7 +298,17 @@ void to_json(json::Node &node, const spkg::Config &value)
 template<>
 bool from_json(const json::Node &node, spkg::PersistEntry &value)
 {
-    return std::visit([&node](auto &value) { return from_json(node, value); }, value);
+    if (spkg::PersistVal val; from_json(node, val))
+    {
+        value = std::move(val);
+        return true;
+    }
+    if (spkg::PersistVec vec; from_json(node, vec))
+    {
+        value = std::move(vec);
+        return true;
+    }
+    return false;
 }
 
 template<>

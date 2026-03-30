@@ -82,5 +82,11 @@ int main(const int argc, const char **argv)
         return 1;
     }
 
-    set_config(config);
+    if (!code)
+    {
+        set_config(config);
+        return 0;
+    }
+
+    return code;
 }
