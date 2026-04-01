@@ -237,15 +237,15 @@ static int read_map_manifest(const std::filesystem::path &path, spkg::PersistMap
         auto size = std::stoull(m[key]);
         auto base = key.substr(0, key.find_last_of(".size"));
 
-        spkg::PersistVec vec(size);
+        spkg::PersistVec persist(size);
         for (std::size_t i = 0; i < size; ++i)
         {
             auto index = base + '[' + std::to_string(i) + ']';
-            vec.push_back(std::move(m[index]));
+            persist.push_back(std::move(m[index]));
             m.erase(index);
         }
 
-        manifest[base] = std::move(vec);
+        manifest[base] = std::move(persist);
     }
 
     for (auto &[key, val] : m)
@@ -279,12 +279,12 @@ static int write_map_manifest(const std::filesystem::path &path, const spkg::Per
     {
         struct
         {
-            auto operator()(const spkg::PersistVal &val)
+            auto operator()(const spkg::PersistVal &val) const
             {
                 vec.push_back(key + '=' + val);
             }
 
-            auto operator()(const spkg::PersistVec &val)
+            auto operator()(const spkg::PersistVec &val) const
             {
                 vec.push_back(key + ".size=" + std::to_string(val.size()));
                 for (std::size_t i = 0; i < val.size(); ++i)
