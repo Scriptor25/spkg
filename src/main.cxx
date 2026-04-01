@@ -36,9 +36,7 @@ static int set_config(const spkg::Config &value)
     if (!stream)
         return spkg::Error("failed open config file '{}'", path.string());
 
-    json::Node json;
-    to_json(json, value);
-    stream << json::pretty << json;
+    stream << std::setw(2) << json::Node(value);
 
     return 0;
 }

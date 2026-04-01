@@ -3,8 +3,6 @@
 #include <package.hxx>
 #include <persist.hxx>
 
-#include <json/json.hxx>
-
 #include <filesystem>
 #include <string>
 

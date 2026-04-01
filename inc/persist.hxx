@@ -14,9 +14,3 @@ namespace spkg
     using PersistEntry = std::variant<PersistVal, PersistVec>;
     using PersistMap = std::map<std::string, PersistEntry>;
 }
-
-template<>
-bool from_json(const json::Node &node, spkg::PersistEntry &value);
-
-template<>
-void to_json(json::Node &node, const spkg::PersistEntry &value);

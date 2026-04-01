@@ -231,7 +231,7 @@ static int read_map_manifest(const std::filesystem::path &path, spkg::PersistMap
     for (auto &key : m | std::views::keys)
         if (key.ends_with(".size"))
             size_keys.insert(key);
-    
+
     for (auto &key : size_keys)
     {
         auto size = std::stoull(m[key]);
@@ -293,7 +293,7 @@ static int write_map_manifest(const std::filesystem::path &path, const spkg::Per
 
             const std::string &key;
             std::vector<std::string> &vec;
-        } visitor { key, vec };
+        } visitor{ key, vec };
 
         std::visit(visitor, val);
     }
@@ -507,7 +507,7 @@ static int execute_command(
             return 0;
         }
 
-        const auto& value = std::get<spkg::PersistVal>(entry);
+        const auto &value = std::get<spkg::PersistVal>(entry);
 
         frame[var] = value;
         spkg::Warning("variable '{}' is not iterable", of);
@@ -814,7 +814,12 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         frame["fragment.description"] = fragment.Description;
         frame["fragment.dir"] = fragment.Dir;
     }
-    if (auto error = execute_segment(context, fragment_frame_index, &fragment, cache_dir / arg.Fragment, fragment.Steps))
+    if (auto error = execute_segment(
+        context,
+        fragment_frame_index,
+        &fragment,
+        cache_dir / arg.Fragment,
+        fragment.Steps))
     {
         remove_work_directory(work_dir);
         return error;
