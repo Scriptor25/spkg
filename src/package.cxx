@@ -1,6 +1,9 @@
 #include <log.hxx>
 #include <package.hxx>
 
+#include <json/json.hxx>
+#include <toml/toml.hxx>
+
 #include <fstream>
 
 bool spkg::FindPackage(const Config &config, const Specifier &specifier, Package &package)
@@ -36,7 +39,8 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
             if (entry.is_directory())
                 continue;
 
-            if (entry.path().extension() != ".json")
+            auto ext = entry.path().extension();
+            if (ext != ".json" && ext != ".toml")
                 continue;
 
             std::ifstream stream(entry.path());
@@ -46,14 +50,29 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
                 continue;
             }
 
-            json::Node node;
-            stream >> node;
-
             Package package;
-            if (!(node >> package))
+
+            if (ext == ".json")
             {
-                Warning("invalid json in package file '{}'", entry.path().string());
-                continue;
+                json::Node node;
+                stream >> node;
+
+                if (!(node >> package))
+                {
+                    Warning("invalid json in package file '{}'", entry.path().string());
+                    continue;
+                }
+            }
+            else if (ext == ".toml")
+            {
+                toml::Node node;
+                stream >> node;
+
+                if (!(node >> package))
+                {
+                    Warning("invalid toml in package file '{}'", entry.path().string());
+                    continue;
+                }
             }
 
             if (fn(std::move(package)))
