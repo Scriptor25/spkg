@@ -22,8 +22,8 @@ namespace spkg
 }
 
 template<>
-struct json::serializer<std::filesystem::path>
+struct data::serializer<std::filesystem::path>
 {
-    static bool from_json(const Node &node, std::filesystem::path &value);
-    static void to_json(Node &node, const std::filesystem::path &value);
+    static bool from_data(const json::Node &node, std::filesystem::path &value);
+    static void to_data(json::Node &node, const std::filesystem::path &value);
 };

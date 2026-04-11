@@ -20,7 +20,7 @@ namespace spkg
 }
 
 template<>
-bool from_json(const json::Node &node, spkg::Config &value);
+bool from_data(const json::Node &node, spkg::Config &value);
 
 template<>
-void to_json(json::Node &node, const spkg::Config &value);
+void to_data(json::Node &node, const spkg::Config &value);

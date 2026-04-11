@@ -109,22 +109,22 @@ struct std::formatter<spkg::Command> : std::formatter<std::string>
 };
 
 template<>
-bool from_json(const json::Node &node, spkg::CaptureDef &value);
+bool from_data(const json::Node &node, spkg::CaptureDef &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::ForEachDef &value);
+bool from_data(const json::Node &node, spkg::ForEachDef &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::Command &value);
+bool from_data(const json::Node &node, spkg::Command &value);
 
 template<>
-bool from_json(const json::Node &node, std::vector<spkg::Command> &value);
+bool from_data(const json::Node &node, std::vector<spkg::Command> &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::Step &value);
+bool from_data(const json::Node &node, spkg::Step &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::Fragment &value);
+bool from_data(const json::Node &node, spkg::Fragment &value);
 
 template<>
-bool from_json(const json::Node &node, spkg::Package &value);
+bool from_data(const json::Node &node, spkg::Package &value);
