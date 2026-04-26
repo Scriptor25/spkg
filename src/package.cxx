@@ -1,5 +1,5 @@
-#include <log.hxx>
 #include <package.hxx>
+#include <log.hxx>
 
 #include <json/json.hxx>
 #include <toml/toml.hxx>
