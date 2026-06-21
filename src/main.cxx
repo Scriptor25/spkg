@@ -2,16 +2,51 @@
 #include <spkg.hxx>
 
 #include <fstream>
+#include <thread>
+
+static const auto path = spkg::GetConfigDir() / "config.json";
+static const auto lock = spkg::GetConfigDir() / "config.lock";
+
+static void acquire_lock()
+{
+    if (std::filesystem::exists(lock))
+    {
+        size_t waited{};
+
+        do
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            ++waited;
+            std::cerr << "\rwaiting for lock file to release [" << waited << "s]";
+        }
+        while (std::filesystem::exists(lock));
+
+        std::cerr << std::endl;
+    }
+
+    {
+        // create lock file
+        std::ofstream lock_stream(lock);
+    }
+}
+
+static void release_lock()
+{
+    std::filesystem::remove(lock);
+}
 
 static spkg::Config get_config()
 {
-    if (std::ifstream stream(spkg::GetConfigDir() / "config.json"); stream)
+    if (std::filesystem::exists(path))
     {
-        json::Node node;
-        stream >> node;
+        if (std::ifstream stream(path); stream)
+        {
+            json::Node node;
+            stream >> node;
 
-        if (spkg::Config value; node >> value)
-            return value;
+            if (spkg::Config value; node >> value)
+                return value;
+        }
     }
 
     return {
@@ -23,8 +58,6 @@ static spkg::Config get_config()
 
 static int set_config(const spkg::Config &value)
 {
-    const auto path = spkg::GetConfigDir() / "config.json";
-
     std::filesystem::create_directories(path.parent_path());
     if (!std::filesystem::exists(path.parent_path()))
         return spkg::Error("failed to create config parent directory '{}'", path.parent_path());
@@ -41,12 +74,14 @@ static int set_config(const spkg::Config &value)
     return 0;
 }
 
-int main(const int argc, const char **argv)
+int main(const int argc, const char **argv) try
 {
     const std::vector<std::string> args(argv + 1, argv + argc);
 
     if (args.empty() || ((args[0] == "help" || args[0] == "h") && args.size() == 1))
         return spkg::Help();
+
+    acquire_lock();
 
     auto config = get_config();
     auto code = -1;
@@ -77,14 +112,25 @@ int main(const int argc, const char **argv)
     if (code < 0)
     {
         std::cerr << "Invalid arguments. Use '" << argv[0] << " help' to print the manual." << std::endl;
+
+        release_lock();
         return 1;
     }
 
     if (!code)
     {
         set_config(config);
+
+        release_lock();
         return 0;
     }
 
     return code;
+}
+catch (const std::runtime_error &error)
+{
+    std::cerr << error.what() << std::endl;
+
+    release_lock();
+    return -1;
 }
