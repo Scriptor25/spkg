@@ -7,8 +7,13 @@
 static const auto path = spkg::GetConfigDir() / "config.json";
 static const auto lock = spkg::GetConfigDir() / "config.lock";
 
+static auto locked = false;
+
 static void acquire_lock()
 {
+    if (locked)
+        return;
+
     if (std::filesystem::exists(lock))
     {
         size_t waited{};
@@ -26,13 +31,18 @@ static void acquire_lock()
 
     {
         // create lock file
+        locked = true;
         std::ofstream lock_stream(lock);
     }
 }
 
 static void release_lock()
 {
+    if (!locked)
+        return;
+
     std::filesystem::remove(lock);
+    locked = false;
 }
 
 static spkg::Config get_config()
@@ -125,6 +135,7 @@ int main(const int argc, const char **argv) try
         return 0;
     }
 
+    release_lock();
     return code;
 }
 catch (const std::runtime_error &error)
