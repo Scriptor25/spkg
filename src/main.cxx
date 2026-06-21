@@ -27,14 +27,14 @@ static int set_config(const spkg::Config &value)
 
     std::filesystem::create_directories(path.parent_path());
     if (!std::filesystem::exists(path.parent_path()))
-        return spkg::Error("failed to create config parent directory '{}'", path.parent_path().string());
+        return spkg::Error("failed to create config parent directory '{}'", path.parent_path());
 
     if (!std::filesystem::is_directory(path.parent_path()))
-        return spkg::Error("config parent path '{}' is not a directory", path.parent_path().string());
+        return spkg::Error("config parent path '{}' is not a directory", path.parent_path());
 
     std::ofstream stream(path);
     if (!stream)
-        return spkg::Error("failed open config file '{}'", path.string());
+        return spkg::Error("failed open config file '{}'", path);
 
     stream << std::setw(2) << json::Node(value);
 

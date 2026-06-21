@@ -111,10 +111,9 @@ void data::serializer<std::filesystem::path>::to_data(json::Node &node, const st
     node = value.string();
 }
 
-template<>
-bool from_data(const json::Node &node, spkg::Config &value)
+bool data::serializer<spkg::Config>::from_data(const json::Node &node, spkg::Config &value)
 {
-    if (!node.Is<json::Node::Map>())
+    if (!node.Is<json::Object>())
         return false;
 
     auto ok = true;
@@ -126,10 +125,9 @@ bool from_data(const json::Node &node, spkg::Config &value)
     return ok;
 }
 
-template<>
-void to_data(json::Node &node, const spkg::Config &value)
+void data::serializer<spkg::Config>::to_data(json::Node &node, const spkg::Config &value)
 {
-    node = json::Node::Map
+    node = json::Object
     {
         { "packages", value.Packages },
         { "cache", value.Cache },

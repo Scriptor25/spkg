@@ -1,5 +1,6 @@
-#include <package.hxx>
 #include <log.hxx>
+#include <package.hxx>
+#include <spkg.hxx>
 
 #include <json/json.hxx>
 #include <toml/toml.hxx>
@@ -24,13 +25,13 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
     {
         if (!std::filesystem::exists(path))
         {
-            Warning("repository path '{}' does not exist", path.string());
+            Warning("repository path '{}' does not exist", path);
             continue;
         }
 
         if (!std::filesystem::is_directory(path))
         {
-            Warning("repository path '{}' is not a directory", path.string());
+            Warning("repository path '{}' is not a directory", path);
             continue;
         }
 
@@ -46,7 +47,7 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
             std::ifstream stream(entry.path());
             if (!stream)
             {
-                Warning("failed to open package file '{}'", entry.path().string());
+                Warning("failed to open package file '{}'", entry.path());
                 continue;
             }
 
@@ -59,7 +60,7 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
 
                 if (!(node >> package))
                 {
-                    Warning("invalid json in package file '{}'", entry.path().string());
+                    Warning("invalid json in package file '{}'", entry.path());
                     continue;
                 }
             }
@@ -70,7 +71,7 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
 
                 if (!(node >> package))
                 {
-                    Warning("invalid toml in package file '{}'", entry.path().string());
+                    Warning("invalid toml in package file '{}'", entry.path());
                     continue;
                 }
             }

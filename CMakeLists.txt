@@ -10,6 +10,6 @@ add_subdirectory(deps/toolkit)
 file(GLOB_RECURSE SOURCES src/*.cxx)
 add_executable(spkg ${SOURCES})
 target_include_directories(spkg PRIVATE inc)
-target_link_libraries(spkg PRIVATE toolkit::json toolkit::toml)
+target_link_libraries(spkg PRIVATE toolkit::core toolkit::json toolkit::toml)
 
 install(TARGETS spkg)

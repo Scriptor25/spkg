@@ -6,6 +6,7 @@
 #include <json/json.hxx>
 
 #include <filesystem>
+#include <format>
 
 namespace spkg
 {
@@ -26,4 +27,14 @@ struct data::serializer<std::filesystem::path>
 {
     static bool from_data(const json::Node &node, std::filesystem::path &value);
     static void to_data(json::Node &node, const std::filesystem::path &value);
+};
+
+template<>
+struct std::formatter<std::filesystem::path> : std::formatter<std::string>
+{
+    template<typename C>
+    auto format(const std::filesystem::path &path, C &&ctx) const
+    {
+        return std::formatter<std::string>::format(std::filesystem::weakly_canonical(path).string(), ctx);
+    }
 };
