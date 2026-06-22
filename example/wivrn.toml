@@ -1,0 +1,124 @@
+id = "wivrn"
+name = "WiVRn"
+description = "WiVRn is an application that wirelessly streams a virtual reality game to a standalone VR headset from a Linux computer."
+params = ["version"]
+
+[[steps]]
+id = "clone"
+cache = ["source"]
+once = true
+run = { args = [
+    "git",
+    "clone",
+    "--depth",
+    "1",
+    "--single-branch",
+    "--branch",
+    "$(package.version?:master)",
+    "--recurse-submodules",
+    "--shallow-submodules",
+    "https://github.com/WiVRn/WiVRn.git",
+    "source",
+] }
+
+[[steps]]
+id = "describe"
+dir = "source"
+once = true
+run = [
+    { args = "git describe --tags --always", capture = "git.desc" },
+    { args = "git rev-parse HEAD", capture = "git.commit" },
+]
+
+[[default.steps]]
+id = "configure"
+cache = ["build"]
+run = { args = [
+    "cmake",
+    "-S",
+    "source",
+    "-B",
+    "build",
+    "-G",
+    "Ninja",
+    "-DCMAKE_BUILD_TYPE=MinSizeRel",
+    "-DCMAKE_C_COMPILER=clang",
+    "-DCMAKE_CXX_COMPILER=clang++",
+    "-DGIT_DESC=$(git.desc)",
+    "-DGIT_COMMIT=$(git.commit)",
+    "-DWIVRN_BUILD_SERVER=ON",
+    "-DWIVRN_BUILD_DASHBOARD=ON",
+    "-DWIVRN_BUILD_CLIENT=OFF",
+    "-DWIVRN_USE_VAAPI=ON",
+    "-DWIVRN_USE_VULKAN_ENCODE=ON",
+    "-DWIVRN_USE_NVENC=ON",
+    "-DWIVRN_USE_X264=ON",
+    "-DWIVRN_USE_PIPEWIRE=ON",
+    "-DWIVRN_USE_PULSEAUDIO=ON",
+    "-DWIVRN_USE_SYSTEMD=ON",
+] }
+
+[[default.steps]]
+id = "build"
+cache = ["build"]
+run = "cmake --build build --parallel"
+
+[[default.steps]]
+id = "install"
+persist = [".files"]
+run = [
+    "sudo cmake --install build --prefix /usr/local",
+    { args = "cat build/install_manifest.txt", capture = { name = ".files", array = true } },
+]
+
+[[default.steps]]
+id = "remove"
+remove = true
+run = { foreach = { var = ".file", of = "install.files" }, args = "sudo rm $(.file)" }
+
+[fragments.android-client]
+name = "Android Client"
+description = "WiVRn android client apk"
+dir = "source"
+env = { JAVA_HOME = "/usr/lib/jvm/java-openjdk" }
+
+[[fragments.android-client.steps]]
+id = "key"
+cache = ["ks.keystore", "gradle.properties"]
+once = true
+run = [
+    { args = [
+        "keytool",
+        "-genkey",
+        "-alias",
+        "default_key",
+        "-keyalg",
+        "RSA",
+        "-keysize",
+        "2048",
+        "-validity",
+        "10000",
+        "-storepass",
+        "12345678",
+        "-keypass",
+        "12345678",
+        "-keystore",
+        "ks.keystore",
+        "-dname",
+        "cn=Unknown, ou=Unknown, o=Unknown, c=Unknown",
+    ] },
+    { args = "echo signingKeyPassword=12345678", output = "gradle.properties" },
+]
+
+[[fragments.android-client.steps]]
+id = "build"
+cache = ["build"]
+run = "./gradlew assembleRelease"
+
+[[fragments.android-client.steps]]
+id = "install"
+run = [
+    "adb start-server",
+    "adb install build/outputs/apk/release/source-release.apk",
+    "adb kill-server",
+]

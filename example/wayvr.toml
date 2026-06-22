@@ -1,0 +1,48 @@
+id = "wayvr"
+name = "WayVR"
+description = "A lightweight OpenXR/OpenVR overlay for Wayland and X11 desktops."
+params = ["version"]
+
+[[steps]]
+id = "clone"
+cache = ["source"]
+once = true
+run = { args = [
+    "git",
+    "clone",
+    "--depth",
+    "1",
+    "--single-branch",
+    "--branch",
+    "$(package.version?:main)",
+    "--recurse-submodules",
+    "--shallow-submodules",
+    "https://github.com/wayvr-org/wayvr.git",
+    "source",
+] }
+
+[[default.steps]]
+id = "build"
+cache = ["build"]
+run = { args = [
+    "cargo",
+    "build",
+    "--release",
+    "--no-default-features",
+    "--features=wayland,openxr,pipewire",
+    "--manifest-path=source/Cargo.toml",
+    "--target-dir=build",
+] }
+
+[[default.steps]]
+id = "install"
+persist = [".files"]
+run = [
+    "sudo install -t /usr/local/bin/ build/release/wayvr",
+    { args = "echo '/usr/local/bin/wayvr'", capture = { name = ".files", array = true } },
+]
+
+[[default.steps]]
+id = "remove"
+remove = true
+run = { foreach = { var = ".file", of = "install.files" }, args = "sudo rm $(.file)" }
