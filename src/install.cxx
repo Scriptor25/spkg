@@ -10,6 +10,7 @@
 #include <fstream>
 #include <ranges>
 #include <utility>
+#include <toolkit/args.hxx>
 
 static int copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
 {
@@ -745,24 +746,42 @@ static int execute_segment(
     return 0;
 }
 
-int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
+int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> line, bool use_cache, bool remove)
 {
     Package package;
-    if (!FindPackage(config, arg, package))
-        return Error("no package '{}'", arg.Id);
+    if (!FindPackage(config, spec, package))
+        return Error("no package '{}'", spec.Id);
+
+    toolkit::arg_manifest manifest;
+    for (auto &param : package.Params)
+        manifest.push_back(
+            {
+                .id = param,
+                .kind = toolkit::arg_kind::value,
+                .patterns = { param, "-" + param, "--" + param },
+            });
+
+    toolkit::arg_context args;
+    if (auto res = toolkit::arg_parse(manifest, line); !res)
+    {
+        std::cerr << res.error() << std::endl;
+        return 1;
+    }
 
     Fragment *p_fragment;
-    if (arg.Fragment == "default")
+    if (spec.Fragment == "default")
         p_fragment = &package.Default;
-    else if (auto it = package.Fragments.find(arg.Fragment); it != package.Fragments.end())
+    else if (auto it = package.Fragments.find(spec.Fragment); it != package.Fragments.end())
         p_fragment = &it->second;
     else
-        return Error("no fragment '{}' in package '{}'", arg.Fragment, arg.Id);
+        return Error("no fragment '{}' in package '{}'", spec.Fragment, spec.Id);
 
     auto &fragment = *p_fragment;
 
-    auto work_dir = config.Cache / (arg.Id + '-' + arg.Fragment);
-    auto cache_dir = config.Cache / arg.Id;
+    auto work_dir = config.Cache / (spec.Id + '-' + spec.Fragment);
+    auto cache_dir = config.Cache / spec.Id;
+
+    // TODO: cache dir + params hash
 
     Context context
     {
@@ -774,7 +793,7 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         .Stack = {},
     };
 
-    if (auto it = config.Installed.find(arg); it != config.Installed.end())
+    if (auto it = config.Installed.find(spec); it != config.Installed.end())
         context.Persist = it->second;
 
     if (!std::filesystem::exists(work_dir))
@@ -797,9 +816,10 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
 
         for (auto &param : package.Params)
         {
-            auto key = '@' + param;
+            auto key = "package." + param;
 
-            // TODO: frame[key] = params[param];
+            if (auto value = args.get(param))
+                frame[key] = std::string(*value);
         }
     }
     if (auto error = execute_segment(context, package_frame_index, nullptr, cache_dir / "__package__", package.Steps))
@@ -819,7 +839,7 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
         context,
         fragment_frame_index,
         &fragment,
-        cache_dir / arg.Fragment,
+        cache_dir / spec.Fragment,
         fragment.Steps))
     {
         remove_work_directory(work_dir);
@@ -827,9 +847,9 @@ int spkg::Install(Config &config, Specifier arg, bool use_cache, bool remove)
     }
 
     if (remove)
-        config.Installed.erase(arg);
+        config.Installed.erase(spec);
     else
-        config.Installed[arg] = std::move(context.Persist);
+        config.Installed[spec] = std::move(context.Persist);
 
     remove_work_directory(work_dir);
     return 0;

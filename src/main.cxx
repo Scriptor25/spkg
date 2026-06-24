@@ -25,7 +25,7 @@ static void acquire_lock()
         {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             ++waited;
-            std::cerr << "\rwaiting for lock file to release [" << waited << "s]";
+            std::cerr << "\rWaiting for lock file to release [" << waited << "s]";
         }
         while (std::filesystem::exists(lock));
 
@@ -73,21 +73,21 @@ static int set_config(const spkg::Config &value)
 {
     std::filesystem::create_directories(path.parent_path());
     if (!std::filesystem::exists(path.parent_path()))
-        return spkg::Error("failed to create config parent directory '{}'", path.parent_path());
+        return spkg::Error("Failed to create config parent directory '{}'", path.parent_path());
 
     if (!std::filesystem::is_directory(path.parent_path()))
-        return spkg::Error("config parent path '{}' is not a directory", path.parent_path());
+        return spkg::Error("Config parent path '{}' is not a directory", path.parent_path());
 
     std::ofstream stream(path);
     if (!stream)
-        return spkg::Error("failed open config file '{}'", path);
+        return spkg::Error("Failed open config file '{}'", path);
 
     stream << std::setw(2) << json::Node(value);
 
     return 0;
 }
 
-static const toolkit::arg_manifest manifest({});
+static const toolkit::arg_manifest manifest;
 
 enum class Operation
 {
@@ -145,26 +145,33 @@ int main(const int argc, const char **argv) try
     auto config = get_config();
     auto code = -1;
 
+    auto count = args.limit == ~size_t() ? args.size() : args.limit;
+
     switch (operation)
     {
     case Operation::Help:
         return spkg::Help();
     case Operation::List:
-        if (args.size() == 1)
+        if (count == 1)
             code = List(config);
         break;
     case Operation::Install:
-        if (args.size() == 2)
-            code = Install(config, args[1], true, false);
+        if (count == 2)
+            code = Install(
+                config,
+                args[1],
+                { args.positional.begin() + count, args.positional.end() },
+                true,
+                false);
         break;
     case Operation::Remove:
-        if (args.size() == 2)
+        if (count == 2)
             code = Remove(config, args[1]);
         break;
     case Operation::Update:
-        if (args.size() == 1)
+        if (count == 1)
             code = Update(config);
-        else if (args.size() == 2)
+        else if (count == 2)
             code = Update(config, args[1]);
         break;
     }
