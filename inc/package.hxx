@@ -1,19 +1,22 @@
 #pragma once
 
-#include <config.hxx>
 #include <specifier.hxx>
 
+#include <data/node.hxx>
 #include <data/serializer.hxx>
 
 #include <format>
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
 namespace spkg
 {
+    struct Config;
+
     struct CaptureDef
     {
         std::string Name;

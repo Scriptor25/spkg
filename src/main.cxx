@@ -1,5 +1,8 @@
+#include <config.hxx>
 #include <log.hxx>
 #include <spkg.hxx>
+
+#include <toolkit/args.hxx>
 
 #include <fstream>
 #include <thread>
@@ -84,44 +87,97 @@ static int set_config(const spkg::Config &value)
     return 0;
 }
 
+static const toolkit::arg_manifest manifest({});
+
+enum class Operation
+{
+    Help,
+    List,
+    Install,
+    Remove,
+    Update,
+};
+
+static const std::unordered_map<std::string_view, Operation> operations
+{
+    { "help", Operation::Help },
+    { "h", Operation::Help },
+    { "?", Operation::Help },
+    { "list", Operation::List },
+    { "l", Operation::List },
+    { "install", Operation::Install },
+    { "i", Operation::Install },
+    { "remove", Operation::Remove },
+    { "r", Operation::Remove },
+    { "update", Operation::Update },
+    { "u", Operation::Update },
+};
+
 int main(const int argc, const char **argv) try
 {
-    const std::vector<std::string> args(argv + 1, argv + argc);
+    toolkit::arg_context args;
+    if (auto res = toolkit::arg_parse(manifest, argc, argv) >> args; !res)
+    {
+        std::cerr << res.error() << std::endl;
+        return 1;
+    }
 
-    if (args.empty() || ((args[0] == "help" || args[0] == "h") && args.size() == 1))
+    if (args.empty())
         return spkg::Help();
+
+    auto it = operations.find(args[0]);
+    if (it == operations.end())
+    {
+        std::cerr
+                << "Invalid operation '"
+                << args[0]
+                << "'. Use '"
+                << args.file
+                << " help' to print the manual."
+                << std::endl;
+        return 1;
+    }
+
+    auto operation = it->second;
 
     acquire_lock();
 
     auto config = get_config();
     auto code = -1;
 
-    if (args[0] == "list" || args[0] == "l")
+    switch (operation)
     {
+    case Operation::Help:
+        return spkg::Help();
+    case Operation::List:
         if (args.size() == 1)
             code = List(config);
-    }
-    else if (args[0] == "install" || args[0] == "i")
-    {
+        break;
+    case Operation::Install:
         if (args.size() == 2)
             code = Install(config, args[1], true, false);
-    }
-    else if (args[0] == "remove" || args[0] == "r")
-    {
+        break;
+    case Operation::Remove:
         if (args.size() == 2)
             code = Remove(config, args[1]);
-    }
-    else if (args[0] == "update" || args[0] == "u")
-    {
+        break;
+    case Operation::Update:
         if (args.size() == 1)
             code = Update(config);
         else if (args.size() == 2)
             code = Update(config, args[1]);
+        break;
     }
 
     if (code < 0)
     {
-        std::cerr << "Invalid arguments. Use '" << argv[0] << " help' to print the manual." << std::endl;
+        std::cerr
+                << "Invalid arguments for operation '"
+                << args[0]
+                << "'. Use '"
+                << args.file
+                << " help' to print the manual."
+                << std::endl;
 
         release_lock();
         return 1;

@@ -1,3 +1,5 @@
+#include <config.hxx>
+#include <specifier.hxx>
 #include <spkg.hxx>
 
 #include <ranges>

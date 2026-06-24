@@ -1,3 +1,4 @@
+#include <config.hxx>
 #include <log.hxx>
 #include <spkg.hxx>
 

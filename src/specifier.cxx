@@ -1,6 +1,6 @@
 #include <specifier.hxx>
 
-spkg::Specifier::Specifier(const std::string &s)
+spkg::Specifier::Specifier(std::string_view s)
 {
     if (const auto pos = s.find(':'); pos != std::string::npos)
     {
@@ -12,6 +12,11 @@ spkg::Specifier::Specifier(const std::string &s)
         Id = s;
         Fragment = "default";
     }
+}
+
+spkg::Specifier::Specifier(const std::string &s)
+    : Specifier(std::string_view(s))
+{
 }
 
 spkg::Specifier::Specifier(std::string id, std::string fragment)

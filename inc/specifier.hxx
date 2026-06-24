@@ -8,6 +8,7 @@ namespace spkg
     struct Specifier
     {
         Specifier() = default;
+        Specifier(std::string_view s);
         Specifier(const std::string &s);
         Specifier(std::string id, std::string fragment);
 

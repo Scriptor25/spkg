@@ -1,6 +1,5 @@
 #pragma once
 
-#include <config.hxx>
 #include <specifier.hxx>
 
 #include <json/json.hxx>
@@ -10,6 +9,8 @@
 
 namespace spkg
 {
+    struct Config;
+
     int Help();
     int List(const Config &config);
     int Install(Config &config, Specifier arg, bool use_cache, bool remove);

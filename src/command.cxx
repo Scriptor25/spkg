@@ -1,5 +1,7 @@
 #include <package.hxx>
 
+#include <iostream>
+
 std::ostream &spkg::operator<<(std::ostream &stream, const Command &command)
 {
     if (!command.Dir.empty())

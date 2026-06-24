@@ -1,6 +1,7 @@
-#include "persist.hxx"
+#include <config.hxx>
 #include <context.hxx>
 #include <log.hxx>
+#include <persist.hxx>
 #include <spkg.hxx>
 
 #include <unistd.h>
