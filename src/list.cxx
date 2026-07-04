@@ -3,9 +3,9 @@
 
 #include <iostream>
 
-int spkg::List(const Config &config)
+void spkg::List(const Config &config)
 {
-    ForEachPackage(
+    (void) ForEachPackage(
         config,
         [](Package &&pkg)
         {
@@ -20,6 +20,4 @@ int spkg::List(const Config &config)
 
             return false;
         });
-
-    return 0;
 }

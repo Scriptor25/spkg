@@ -5,17 +5,22 @@
 #include <json/json.hxx>
 
 #include <filesystem>
-#include <map>
-#include <set>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace spkg
 {
     struct Config
     {
-        std::set<std::filesystem::path> Packages;
         std::filesystem::path Cache;
+        std::unordered_set<std::filesystem::path> Packages;
+        std::unordered_map<std::string, PersistMap> Installed;
 
-        std::map<std::string, PersistMap> Installed;
+        bool CacheUpdated{};
+        std::unordered_set<std::filesystem::path> PackagesAdded;
+        std::unordered_set<std::filesystem::path> PackagesRemoved;
+        std::unordered_set<std::string> InstalledAdded;
+        std::unordered_set<std::string> InstalledRemoved;
     };
 }
 

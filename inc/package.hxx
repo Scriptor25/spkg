@@ -88,8 +88,8 @@ namespace spkg
         std::map<std::string, Fragment> Fragments;
     };
 
-    bool FindPackage(const Config &config, const Specifier &specifier, Package &package);
-    bool ForEachPackage(const Config &config, const std::function<bool(Package &&)> &fn);
+    [[nodiscard]] bool FindPackage(const Config &config, const Specifier &specifier, Package &package);
+    [[nodiscard]] bool ForEachPackage(const Config &config, const std::function<bool(Package &&)> &fn);
 
     void ParseArgs(const std::string &line, std::vector<std::string> &args);
 

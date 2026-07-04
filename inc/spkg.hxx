@@ -1,6 +1,5 @@
 #pragma once
 
-#include <persist.hxx>
 #include <specifier.hxx>
 
 #include <json/json.hxx>
@@ -8,16 +7,22 @@
 #include <filesystem>
 #include <format>
 #include <span>
+#include <toolkit/result.hxx>
 
 namespace spkg
 {
     struct Config;
 
-    int Help();
-    int List(const Config &config);
-    int Install(Config &config, Specifier spec, std::span<std::string_view> line, bool use_cache, bool remove);
-    int Remove(Config &config, Specifier spec);
-    int Update(Config &config, const std::optional<Specifier> &spec = std::nullopt);
+    void Help();
+    void List(const Config &config);
+    toolkit::result<> Install(
+        Config &config,
+        Specifier spec,
+        std::span<const std::string_view> line,
+        bool use_cache,
+        bool remove);
+    toolkit::result<> Remove(Config &config, Specifier spec);
+    toolkit::result<> Update(Config &config, const std::optional<Specifier> &spec = std::nullopt);
 
     std::filesystem::path GetHomeDir();
     std::filesystem::path GetDefaultPackagesDir();

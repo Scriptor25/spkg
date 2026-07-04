@@ -119,8 +119,8 @@ bool data::serializer<spkg::Config>::from_data(const json::Node &node, spkg::Con
 
     auto ok = true;
 
-    ok &= from_data_opt(node["packages"], value.Packages, { spkg::GetDefaultPackagesDir() });
     ok &= from_data_opt(node["cache"], value.Cache, spkg::GetDefaultCacheDir());
+    ok &= from_data_opt(node["packages"], value.Packages, { spkg::GetDefaultPackagesDir() });
     ok &= from_data_opt(node["installed"], value.Installed);
 
     return ok;
@@ -130,8 +130,8 @@ void data::serializer<spkg::Config>::to_data(json::Node &node, const spkg::Confi
 {
     node = json::Object
     {
-        { "packages", value.Packages },
         { "cache", value.Cache },
+        { "packages", value.Packages },
         { "installed", value.Installed },
     };
 }

@@ -21,6 +21,5 @@ namespace spkg
     auto Error(std::format_string<A...> format, A &&... args)
     {
         std::cerr << "Error: " << std::format<A...>(format, std::forward<A>(args)...) << std::endl;
-        return 1;
     }
 }

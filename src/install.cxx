@@ -11,14 +11,15 @@
 #include <ranges>
 #include <utility>
 #include <toolkit/args.hxx>
+#include <toolkit/string.hxx>
 
-static int copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
+static toolkit::result<> copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
 {
     std::error_code ec;
 
     const auto status = std::filesystem::status(from, ec);
     if (ec)
-        return spkg::Error(
+        return toolkit::make_error(
             "failed to get status for '{}': {} ({})",
             from,
             ec.message(),
@@ -28,7 +29,7 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
     {
     case std::filesystem::file_type::regular:
         if (std::filesystem::create_directories(to.parent_path(), ec); ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to create directory '{}': {} ({})",
                 to.parent_path(),
                 ec.message(),
@@ -39,7 +40,7 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
             to,
             std::filesystem::copy_options::overwrite_existing,
             ec); ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to copy file from '{}' to '{}': {} ({})",
                 from,
                 to,
@@ -51,7 +52,7 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
             status.permissions(),
             std::filesystem::perm_options::replace,
             ec); ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to set permissions for file '{}': {} ({})",
                 to,
                 ec.message(),
@@ -61,7 +62,7 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
             to,
             std::filesystem::last_write_time(from),
             ec); ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to set last write time for file '{}': {} ({})",
                 to,
                 ec.message(),
@@ -71,7 +72,7 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
 
     case std::filesystem::file_type::directory:
         if (std::filesystem::create_directories(to, ec); ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to create directory '{}': {} ({})",
                 to,
                 ec.message(),
@@ -83,8 +84,8 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
             auto relative = std::filesystem::relative(source, from);
             auto target = to / relative;
 
-            if (const auto error = copy_files(source, target))
-                return error;
+            if (auto res = copy_files(source, target); !res)
+                return res;
         }
 
         break;
@@ -94,7 +95,7 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
             from,
             to,
             ec); ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to copy symlink from '{}' to '{}': {} ({})",
                 from,
                 to,
@@ -107,10 +108,10 @@ static int copy_files(const std::filesystem::path &from, const std::filesystem::
         break;
     }
 
-    return 0;
+    return {};
 }
 
-static int copy_cache(
+static toolkit::result<> copy_cache(
     const std::filesystem::path &src_path,
     const std::filesystem::path &dst_path,
     const std::vector<std::string> &cache)
@@ -128,17 +129,17 @@ static int copy_cache(
 
         if (std::filesystem::exists(to))
             if (std::error_code ec; std::filesystem::remove_all(to, ec), ec)
-                return spkg::Error(
+                return toolkit::make_error(
                     "failed to remove cache entry target '{}': {} ({})",
                     to,
                     ec.message(),
                     ec.value());
 
-        if (const auto error = copy_files(from, to))
-            return error;
+        if (auto res = copy_files(from, to); !res)
+            return res;
     }
 
-    return 0;
+    return {};
 }
 
 static void remove_work_directory(const std::filesystem::path &path)
@@ -188,40 +189,40 @@ static std::string rtrim(const std::string &s)
     return { b, e };
 }
 
-static int read_manifest(const std::filesystem::path &path, std::vector<std::string> &manifest)
+static toolkit::result<> read_manifest(const std::filesystem::path &path, std::vector<std::string> &manifest)
 {
     if (!std::filesystem::exists(path))
-        return spkg::Error("manifest path '{}' does not exist", path);
+        return toolkit::make_error("manifest path '{}' does not exist", path);
 
     if (std::filesystem::is_directory(path))
-        return spkg::Error("manifest path '{}' is a directory", path);
+        return toolkit::make_error("manifest path '{}' is a directory", path);
 
     std::ifstream stream(path);
     if (!stream)
-        return spkg::Error("failed to open manifest path '{}'", path);
+        return toolkit::make_error("failed to open manifest path '{}'", path);
 
     for (std::string line; std::getline(stream, line);)
     {
-        line = trim(line);
+        line = toolkit::trim(std::move(line));
         if (!line.empty())
             manifest.push_back(std::move(line));
     }
 
-    return 0;
+    return {};
 }
 
-static int read_map_manifest(const std::filesystem::path &path, spkg::PersistMap &manifest)
+static toolkit::result<> read_map_manifest(const std::filesystem::path &path, spkg::PersistMap &manifest)
 {
     std::vector<std::string> vec;
-    if (const auto error = read_manifest(path, vec))
-        return error;
+    if (auto res = read_manifest(path, vec); !res)
+        return res;
 
     std::map<std::string, std::string> m;
     for (auto &line : vec)
     {
         const auto pos = line.find('=');
         if (pos == std::string::npos)
-            return spkg::Error("invalid manifest line '{}'", line);
+            return toolkit::make_error("invalid manifest line '{}'", line);
 
         auto key = line.substr(0, pos);
         auto val = line.substr(pos + 1);
@@ -253,28 +254,28 @@ static int read_map_manifest(const std::filesystem::path &path, spkg::PersistMap
     for (auto &[key, val] : m)
         manifest[key] = std::move(val);
 
-    return 0;
+    return {};
 }
 
-static int write_manifest(const std::filesystem::path &path, const std::vector<std::string> &manifest)
+static toolkit::result<> write_manifest(const std::filesystem::path &path, const std::vector<std::string> &manifest)
 {
     std::filesystem::create_directories(path.parent_path());
 
     if (!std::filesystem::exists(path.parent_path()))
-        return spkg::Error("failed to create manifest parent path '{}'", path.parent_path());
+        return toolkit::make_error("failed to create manifest parent path '{}'", path.parent_path());
 
     std::ofstream stream(path);
     if (!stream)
-        return spkg::Error("failed to open manifest path '{}'", path);
+        return toolkit::make_error("failed to open manifest path '{}'", path);
 
     for (auto &line : manifest)
         if (auto trimmed = trim(line); !trimmed.empty())
             stream << trimmed << std::endl;
 
-    return 0;
+    return {};
 }
 
-static int write_map_manifest(const std::filesystem::path &path, const spkg::PersistMap &manifest)
+static toolkit::result<> write_map_manifest(const std::filesystem::path &path, const spkg::PersistMap &manifest)
 {
     std::vector<std::string> vec;
     for (auto &[key, val] : manifest)
@@ -584,7 +585,7 @@ static void save(
     }
 }
 
-static int execute_steps(
+static toolkit::result<> execute_steps(
     spkg::Context &context,
     const spkg::Fragment *fragment,
     const std::filesystem::path &base_cache_dir,
@@ -635,15 +636,15 @@ static int execute_steps(
             if (step_has_cache)
             {
                 spkg::Info("restoring cache from '{}'", step_cache_dir);
-                if (const auto error = copy_cache(step_cache_dir, step_work_dir, step.Cache))
-                    return error;
+                if (auto res = copy_cache(step_cache_dir, step_work_dir, step.Cache); !res)
+                    return res;
             }
 
             if (step_manifest_exists)
             {
                 spkg::Info("restoring manifest from '{}'", step_manifest);
-                if (const auto error = read_map_manifest(step_manifest, context.Stack[frame_index]))
-                    return error;
+                if (auto res = read_map_manifest(step_manifest, context.Stack[frame_index]); !res)
+                    return res;
             }
         }
 
@@ -658,13 +659,13 @@ static int execute_steps(
         spkg::Info("executing step {}", step.Id);
         for (auto &command : step.Run)
             if (auto result = execute_command(context, package, fragment, step, command, work_dir))
-                return Error("command '{}' exited with non-zero result {}", command, result);
+                return toolkit::make_error("command '{}' exited with non-zero result {}", command, result);
 
         if (!step_cache_exists)
         {
             spkg::Info("creating cache directory '{}'", step_cache_dir);
             if (std::error_code ec; std::filesystem::create_directories(step_cache_dir, ec), ec)
-                return spkg::Error(
+                return toolkit::make_error(
                     "failed to create cache directory '{}': {} ({})",
                     step_cache_dir,
                     ec.message(),
@@ -674,18 +675,18 @@ static int execute_steps(
         if (step_has_cache)
         {
             spkg::Info("saving cache to '{}'", step_cache_dir);
-            if (const auto error = copy_cache(step_work_dir, step_cache_dir, step.Cache))
+            if (auto res = copy_cache(step_work_dir, step_cache_dir, step.Cache); !res)
             {
                 remove_cache_directory(step_cache_dir);
-                return error;
+                return res;
             }
         }
 
         spkg::Info("saving manifest to '{}'", step_manifest);
-        if (const auto error = write_map_manifest(step_manifest, context.Stack[frame_index]))
+        if (auto res = write_map_manifest(step_manifest, context.Stack[frame_index]); !res)
         {
             remove_cache_directory(step_cache_dir);
-            return error;
+            return res;
         }
 
         if (!step.Persist.empty())
@@ -697,10 +698,10 @@ static int execute_steps(
         }
     }
 
-    return 0;
+    return {};
 }
 
-static int execute_segment(
+static toolkit::result<> execute_segment(
     spkg::Context &context,
     const std::size_t frame_index,
     const spkg::Fragment *fragment,
@@ -714,22 +715,22 @@ static int execute_segment(
     if (use_cache && std::filesystem::exists(manifest))
     {
         spkg::Info("restoring manifest from '{}'", manifest);
-        if (const auto error = read_map_manifest(manifest, context.Stack[frame_index]))
-            return error;
+        if (auto res = read_map_manifest(manifest, context.Stack[frame_index]); !res)
+            return res;
     }
 
     bool any;
-    if (const auto error = execute_steps(context, fragment, base_cache_dir, steps, any))
-        return error;
+    if (auto res = execute_steps(context, fragment, base_cache_dir, steps, any); !res)
+        return res;
 
     if (!any)
-        return 0;
+        return {};
 
     if (!std::filesystem::exists(base_cache_dir))
     {
         spkg::Info("creating cache directory '{}'", base_cache_dir);
         if (std::error_code ec; std::filesystem::create_directories(base_cache_dir, ec), ec)
-            return spkg::Error(
+            return toolkit::make_error(
                 "failed to create cache directory '{}': {} ({})",
                 base_cache_dir,
                 ec.message(),
@@ -737,20 +738,25 @@ static int execute_segment(
     }
 
     spkg::Info("saving manifest to '{}'", manifest);
-    if (const auto error = write_map_manifest(manifest, context.Stack[frame_index]))
+    if (auto res = write_map_manifest(manifest, context.Stack[frame_index]); !res)
     {
         remove_cache_directory(base_cache_dir);
-        return error;
+        return res;
     }
 
-    return 0;
+    return {};
 }
 
-int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> line, bool use_cache, bool remove)
+toolkit::result<> spkg::Install(
+    Config &config,
+    Specifier spec,
+    std::span<const std::string_view> line,
+    bool use_cache,
+    bool remove)
 {
     Package package;
     if (!FindPackage(config, spec, package))
-        return Error("no package '{}'", spec.Id);
+        return toolkit::make_error("no package '{}'", spec.Id);
 
     toolkit::arg_manifest manifest;
     for (auto &param : package.Params)
@@ -763,10 +769,7 @@ int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> li
 
     toolkit::arg_context args;
     if (auto res = toolkit::arg_parse(manifest, line); !res)
-    {
-        std::cerr << res.error() << std::endl;
-        return 1;
-    }
+        return res;
 
     Fragment *p_fragment;
     if (spec.Fragment == "default")
@@ -774,7 +777,7 @@ int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> li
     else if (auto it = package.Fragments.find(spec.Fragment); it != package.Fragments.end())
         p_fragment = &it->second;
     else
-        return Error("no fragment '{}' in package '{}'", spec.Fragment, spec.Id);
+        return toolkit::make_error("no fragment '{}' in package '{}'", spec.Fragment, spec.Id);
 
     auto &fragment = *p_fragment;
 
@@ -800,7 +803,7 @@ int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> li
     {
         Info("creating work directory '{}'", work_dir);
         if (std::error_code ec; std::filesystem::create_directories(work_dir, ec), ec)
-            return Error(
+            return toolkit::make_error(
                 "failed to create work directory '{}': {} ({})",
                 work_dir,
                 ec.message(),
@@ -822,10 +825,15 @@ int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> li
                 frame[key] = std::string(*value);
         }
     }
-    if (auto error = execute_segment(context, package_frame_index, nullptr, cache_dir / "__package__", package.Steps))
+    if (auto res = execute_segment(
+        context,
+        package_frame_index,
+        nullptr,
+        cache_dir / "__package__",
+        package.Steps); !res)
     {
         remove_work_directory(work_dir);
-        return error;
+        return res;
     }
 
     auto fragment_frame_index = context.Stack.size();
@@ -835,22 +843,28 @@ int spkg::Install(Config &config, Specifier spec, std::span<std::string_view> li
         frame["fragment.description"] = fragment.Description;
         frame["fragment.dir"] = fragment.Dir;
     }
-    if (auto error = execute_segment(
+    if (auto res = execute_segment(
         context,
         fragment_frame_index,
         &fragment,
         cache_dir / spec.Fragment,
-        fragment.Steps))
+        fragment.Steps); !res)
     {
         remove_work_directory(work_dir);
-        return error;
+        return res;
     }
 
     if (remove)
+    {
         config.Installed.erase(spec);
+        config.InstalledRemoved.insert(spec);
+    }
     else
+    {
         config.Installed[spec] = std::move(context.Persist);
+        config.InstalledAdded.insert(spec);
+    }
 
     remove_work_directory(work_dir);
-    return 0;
+    return {};
 }

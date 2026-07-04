@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-int spkg::Help()
+void spkg::Help()
 {
     std::cout <<
             "spkg\n"
@@ -13,6 +13,4 @@ int spkg::Help()
             "spkg (remove|r) <id>[:<fragment>]   - remove package\n"
             "spkg (update|u) [<id>[:<fragment>]] - update all or specific package\n"
             << std::endl;
-
-    return 0;
 }
