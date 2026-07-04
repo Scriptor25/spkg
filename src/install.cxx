@@ -821,8 +821,19 @@ toolkit::result<> spkg::Install(
         {
             auto key = "package." + param;
 
-            if (auto value = args.get(param))
-                frame[key] = std::string(*value);
+            if (remove)
+            {
+                if (auto it = context.Persist.find(key); it != context.Persist.end())
+                    frame[key] = it->second;
+            }
+            else
+            {
+                if (auto value = args.get(param))
+                {
+                    frame[key] = std::string(*value);
+                    context.Persist[key] = std::string(*value);
+                }
+            }
         }
     }
     if (auto res = execute_segment(
