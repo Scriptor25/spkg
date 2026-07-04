@@ -767,8 +767,12 @@ toolkit::result<> spkg::Install(
                 .patterns = { param, "-" + param, "--" + param },
             });
 
+    std::vector<std::string_view> next(line.size() + 1);
+    for (size_t i = 0; i < line.size(); ++i)
+        next[i + 1] = line[i];
+
     toolkit::arg_context args;
-    if (auto res = toolkit::arg_parse(manifest, line); !res)
+    if (auto res = toolkit::arg_parse(manifest, next) >> args; !res)
         return res;
 
     Fragment *p_fragment;
