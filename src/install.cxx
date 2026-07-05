@@ -12,6 +12,7 @@
 
 #include <fstream>
 #include <ranges>
+#include <sstream>
 #include <utility>
 
 static toolkit::result<> copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
