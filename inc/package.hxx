@@ -116,15 +116,15 @@ struct std::formatter<spkg::Command> : std::formatter<std::string>
 template<>
 struct data::serializer<spkg::CaptureDef>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, spkg::CaptureDef &value)
     {
-        using Map = N::Map;
+        using map_type = N::map_type;
 
         if (node >> value.Name)
             return true;
 
-        if (!node.template Is<Map>())
+        if (!node.template is<map_type>())
             return false;
 
         auto ok = true;
@@ -139,12 +139,12 @@ struct data::serializer<spkg::CaptureDef>
 template<>
 struct data::serializer<spkg::ForEachDef>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, spkg::ForEachDef &value)
     {
-        using Map = N::Map;
+        using map_type = N::map_type;
 
-        if (!node.template Is<Map>())
+        if (!node.template is<map_type>())
             return false;
 
         auto ok = true;
@@ -159,10 +159,10 @@ struct data::serializer<spkg::ForEachDef>
 template<>
 struct data::serializer<spkg::Command>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, spkg::Command &value)
     {
-        using Map = N::Map;
+        using map_type = N::map_type;
 
         if (std::string line; node >> line)
         {
@@ -170,7 +170,7 @@ struct data::serializer<spkg::Command>
             return true;
         }
 
-        if (!node.template Is<Map>())
+        if (!node.template is<map_type>())
             return false;
 
         auto ok = true;
@@ -195,10 +195,10 @@ struct data::serializer<spkg::Command>
 template<>
 struct data::serializer<std::vector<spkg::Command>>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, std::vector<spkg::Command> &value)
     {
-        using Vec = N::Vec;
+        using vec_type = N::vec_type;
 
         if (!node)
             return true;
@@ -209,7 +209,7 @@ struct data::serializer<std::vector<spkg::Command>>
             return true;
         }
 
-        if (!node.template Is<Vec>())
+        if (!node.template is<vec_type>())
             return false;
 
         value.resize(node.size());
@@ -224,12 +224,12 @@ struct data::serializer<std::vector<spkg::Command>>
 template<>
 struct data::serializer<spkg::Step>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, spkg::Step &value)
     {
-        using Map = N::Map;
+        using map_type = N::map_type;
 
-        if (!node.template Is<Map>())
+        if (!node.template is<map_type>())
             return false;
 
         auto ok = true;
@@ -254,15 +254,15 @@ struct data::serializer<spkg::Step>
 template<>
 struct data::serializer<spkg::Fragment>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, spkg::Fragment &value)
     {
-        using Map = N::Map;
+        using map_type = N::map_type;
 
         if (node >> value.Steps)
             return true;
 
-        if (!node.template Is<Map>())
+        if (!node.template is<map_type>())
             return false;
 
         auto ok = true;
@@ -282,12 +282,12 @@ struct data::serializer<spkg::Fragment>
 template<>
 struct data::serializer<spkg::Package>
 {
-    template<node N>
+    template<node_type N>
     static bool from_data(const N &node, spkg::Package &value)
     {
-        using Map = N::Map;
+        using map_type = N::map_type;
 
-        if (!node.template Is<Map>())
+        if (!node.template is<map_type>())
             return false;
 
         auto ok = true;

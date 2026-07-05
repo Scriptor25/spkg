@@ -4,14 +4,15 @@
 #include <persist.hxx>
 #include <spkg.hxx>
 
+#include <args/args.hxx>
+#include <toolkit/string.hxx>
+
 #include <unistd.h>
 #include <sys/wait.h>
 
 #include <fstream>
 #include <ranges>
 #include <utility>
-#include <toolkit/args.hxx>
-#include <toolkit/string.hxx>
 
 static toolkit::result<> copy_files(const std::filesystem::path &from, const std::filesystem::path &to)
 {
@@ -203,7 +204,7 @@ static toolkit::result<> read_manifest(const std::filesystem::path &path, std::v
 
     for (std::string line; std::getline(stream, line);)
     {
-        line = toolkit::trim(std::move(line));
+        line = toolkit::trim(line);
         if (!line.empty())
             manifest.push_back(std::move(line));
     }
@@ -758,21 +759,22 @@ toolkit::result<> spkg::Install(
     if (!FindPackage(config, spec, package))
         return toolkit::make_error("no package '{}'", spec.Id);
 
-    toolkit::arg_manifest manifest;
+    args::manifest manifest;
     for (auto &param : package.Params)
-        manifest.push_back(
+        if (auto res = manifest.insert(
             {
                 .id = param,
-                .kind = toolkit::arg_kind::value,
+                .kind = args::entry_kind::value,
                 .patterns = { param, "-" + param, "--" + param },
-            });
+            }); !res)
+            return res;
 
     std::vector<std::string_view> next(line.size() + 1);
     for (size_t i = 0; i < line.size(); ++i)
         next[i + 1] = line[i];
 
-    toolkit::arg_context args;
-    if (auto res = toolkit::arg_parse(manifest, next) >> args; !res)
+    args::context args;
+    if (auto res = args::context::parse(manifest, next) >> args; !res)
         return res;
 
     Fragment *p_fragment;

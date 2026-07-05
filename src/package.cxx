@@ -56,7 +56,7 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
 
             if (ext == ".json")
             {
-                json::Node node;
+                json::node node;
                 stream >> node;
 
                 if (!(node >> package))
@@ -67,7 +67,7 @@ bool spkg::ForEachPackage(const Config &config, const std::function<bool(Package
             }
             else if (ext == ".toml")
             {
-                toml::Node node;
+                toml::node node;
                 stream >> node;
 
                 if (!(node >> package))

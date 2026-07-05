@@ -33,8 +33,8 @@ namespace spkg
 template<>
 struct data::serializer<std::filesystem::path>
 {
-    static bool from_data(const json::Node &node, std::filesystem::path &value);
-    static void to_data(json::Node &node, const std::filesystem::path &value);
+    static bool from_data(const json::node &node, std::filesystem::path &value);
+    static void to_data(json::node &node, const std::filesystem::path &value);
 };
 
 template<>

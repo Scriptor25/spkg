@@ -1,12 +1,11 @@
 #include <config.hxx>
+#include <lock.hxx>
 #include <log.hxx>
 #include <spkg.hxx>
 
-#include <toolkit/args.hxx>
+#include <args/args.hxx>
 
 #include <fstream>
-#include <lock.hxx>
-#include <thread>
 
 static toolkit::result<spkg::Config> read_config()
 {
@@ -22,7 +21,7 @@ static toolkit::result<spkg::Config> read_config()
 
         if (std::ifstream stream(config_path); stream)
         {
-            json::Node node;
+            json::node node;
             stream >> node;
 
             if (spkg::Config value; node >> value)
@@ -47,7 +46,7 @@ static spkg::Config read_config_no_lock()
     {
         if (std::ifstream stream(config_path); stream)
         {
-            json::Node node;
+            json::node node;
             stream >> node;
 
             if (spkg::Config value; node >> value)
@@ -110,7 +109,7 @@ static toolkit::result<> write_config(spkg::Config &config)
         if (!stream)
             return toolkit::make_error("failed open temporary config file.");
 
-        stream << std::setw(2) << json::Node(merge);
+        stream << std::setw(2) << json::node(merge);
     }
 
     if (std::error_code ec; std::filesystem::remove(config_path, ec), ec)
@@ -127,7 +126,7 @@ static toolkit::result<> write_config(spkg::Config &config)
     return {};
 }
 
-static const toolkit::arg_manifest manifest;
+static const args::manifest manifest;
 
 enum class Operation
 {
@@ -153,9 +152,9 @@ static const std::unordered_map<std::string_view, Operation> operations
     { "u", Operation::Update },
 };
 
-static toolkit::result<> run(const toolkit::arg_context &args, spkg::Config &config, Operation operation)
+static toolkit::result<> run(const args::context &args, spkg::Config &config, Operation operation)
 {
-    const auto count = args.limit == ~size_t() ? args.size() : args.limit;
+    const auto count = args.limited() ? args.limit() : args.size();
 
     switch (operation)
     {
@@ -177,7 +176,7 @@ static toolkit::result<> run(const toolkit::arg_context &args, spkg::Config &con
         return Install(
             config,
             args[1],
-            { args.positional.begin() + static_cast<long>(count), args.positional.end() },
+            { args.begin() + static_cast<long>(count), args.end() },
             true,
             false);
 
@@ -198,13 +197,13 @@ static toolkit::result<> run(const toolkit::arg_context &args, spkg::Config &con
     return toolkit::make_error(
         "invalid arguments for operation '{}'. Use '{} help' to print the manual.",
         args[0],
-        args.file);
+        args.file());
 }
 
 int main(const int argc, const char **argv)
 {
-    toolkit::arg_context args;
-    if (auto res = toolkit::arg_parse(manifest, argc, argv) >> args; !res)
+    args::context args;
+    if (auto res = args::context::parse(manifest, argc, argv) >> args; !res)
     {
         spkg::Error("failed to parse arguments: {}", res.error());
         return 1;
@@ -223,7 +222,7 @@ int main(const int argc, const char **argv)
                 << "invalid operation '"
                 << args[0]
                 << "'. Use '"
-                << args.file
+                << args.file()
                 << " help' to print the manual."
                 << std::endl;
         return 1;
