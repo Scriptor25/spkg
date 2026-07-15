@@ -67,7 +67,7 @@ run = "cmake --build build --parallel"
 id = "install"
 persist = [".files"]
 run = [
-    "sudo cmake --install build --prefix /usr/local",
+    "sudo cmake --install build",
     { args = "cat build/install_manifest.txt", capture = { name = ".files", array = true } },
 ]
 
