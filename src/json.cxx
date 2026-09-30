@@ -96,7 +96,9 @@ void spkg::ParseArgs(const std::string &line, std::vector<std::string> &args)
         args.push_back(std::move(buffer));
 }
 
-bool data::serializer<std::filesystem::path>::from_data(const json::node &node, std::filesystem::path &value)
+bool data::serializer<json::node, std::filesystem::path>::from_data(
+    const json::node &node,
+    std::filesystem::path &value)
 {
     if (std::string val; node >> val)
     {
@@ -107,12 +109,16 @@ bool data::serializer<std::filesystem::path>::from_data(const json::node &node, 
     return false;
 }
 
-void data::serializer<std::filesystem::path>::to_data(json::node &node, const std::filesystem::path &value)
+void data::serializer<json::node, std::filesystem::path>::to_data(
+    json::node &node,
+    const std::filesystem::path &value)
 {
     node = value.string();
 }
 
-bool data::serializer<spkg::Config>::from_data(const json::node &node, spkg::Config &value)
+bool data::serializer<json::node, spkg::Config>::from_data(
+    const json::node &node,
+    spkg::Config &value)
 {
     if (!node.is<json::object>())
         return false;
@@ -126,7 +132,9 @@ bool data::serializer<spkg::Config>::from_data(const json::node &node, spkg::Con
     return ok;
 }
 
-void data::serializer<spkg::Config>::to_data(json::node &node, const spkg::Config &value)
+void data::serializer<json::node, spkg::Config>::to_data(
+    json::node &node,
+    const spkg::Config &value)
 {
     node = json::object
     {

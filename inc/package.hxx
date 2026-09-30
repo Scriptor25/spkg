@@ -113,10 +113,9 @@ struct std::formatter<spkg::Command> : std::formatter<std::string>
     }
 };
 
-template<>
-struct data::serializer<spkg::CaptureDef>
+template<data::node_type N>
+struct data::serializer<N, spkg::CaptureDef>
 {
-    template<node_type N>
     static bool from_data(const N &node, spkg::CaptureDef &value)
     {
         using map_type = N::map_type;
@@ -136,10 +135,9 @@ struct data::serializer<spkg::CaptureDef>
     }
 };
 
-template<>
-struct data::serializer<spkg::ForEachDef>
+template<data::node_type N>
+struct data::serializer<N, spkg::ForEachDef>
 {
-    template<node_type N>
     static bool from_data(const N &node, spkg::ForEachDef &value)
     {
         using map_type = N::map_type;
@@ -156,10 +154,9 @@ struct data::serializer<spkg::ForEachDef>
     }
 };
 
-template<>
-struct data::serializer<spkg::Command>
+template<data::node_type N>
+struct data::serializer<N, spkg::Command>
 {
-    template<node_type N>
     static bool from_data(const N &node, spkg::Command &value)
     {
         using map_type = N::map_type;
@@ -192,10 +189,9 @@ struct data::serializer<spkg::Command>
     }
 };
 
-template<>
-struct data::serializer<std::vector<spkg::Command>>
+template<data::node_type N>
+struct data::serializer<N, std::vector<spkg::Command>>
 {
-    template<node_type N>
     static bool from_data(const N &node, std::vector<spkg::Command> &value)
     {
         using vec_type = N::vec_type;
@@ -221,10 +217,9 @@ struct data::serializer<std::vector<spkg::Command>>
     }
 };
 
-template<>
-struct data::serializer<spkg::Step>
+template<data::node_type N>
+struct data::serializer<N, spkg::Step>
 {
-    template<node_type N>
     static bool from_data(const N &node, spkg::Step &value)
     {
         using map_type = N::map_type;
@@ -251,10 +246,9 @@ struct data::serializer<spkg::Step>
     }
 };
 
-template<>
-struct data::serializer<spkg::Fragment>
+template<data::node_type N>
+struct data::serializer<N, spkg::Fragment>
 {
-    template<node_type N>
     static bool from_data(const N &node, spkg::Fragment &value)
     {
         using map_type = N::map_type;
@@ -279,10 +273,9 @@ struct data::serializer<spkg::Fragment>
     }
 };
 
-template<>
-struct data::serializer<spkg::Package>
+template<data::node_type N>
+struct data::serializer<N, spkg::Package>
 {
-    template<node_type N>
     static bool from_data(const N &node, spkg::Package &value)
     {
         using map_type = N::map_type;
