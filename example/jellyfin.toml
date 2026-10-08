@@ -1,6 +1,6 @@
 id = "jellyfin"
 name = "Jellyfin Desktop"
-description = "A Jellyfin desktop client built on CEF and mpv. A complete rewrite of the previous Qt-based client."
+description = "Jellyfin desktop client built with Qt WebEngine and libmpv. Supports audio passthrough, hardware decoding, and playback of more formats without transcoding."
 params = ["version"]
 
 [[steps]]
@@ -14,7 +14,7 @@ run = { args = [
     "1",
     "--single-branch",
     "--branch",
-    "$(package.version?:main)",
+    "$(package.version?:master)",
     "--recurse-submodules",
     "--shallow-submodules",
     "https://github.com/jellyfin/jellyfin-desktop.git",
@@ -22,33 +22,22 @@ run = { args = [
 ] }
 
 [[default.steps]]
+id = "configure"
+cache = ["build"]
+run = "cmake -S source -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DUSE_STATIC_MPVQT=ON"
+
+[[default.steps]]
 id = "build"
-dir = "source"
-cache = [".cache"]
-run = "just build"
+cache = ["build"]
+run = "cmake --build build --parallel"
 
 [[default.steps]]
 id = "install"
-dir = "source"
 run = [
-    "sudo install -d /opt/jellyfin-desktop",
-    "sudo install -m 755 build/jellyfin-desktop /opt/jellyfin-desktop/",
-    "sudo install -m 644 build/chrome_100_percent.pak /opt/jellyfin-desktop/",
-    "sudo install -m 644 build/chrome_200_percent.pak /opt/jellyfin-desktop/",
-    "sudo install -m 644 build/icudtl.dat /opt/jellyfin-desktop/",
-    "sudo install -m 644 build/resources.pak /opt/jellyfin-desktop/",
-    "sudo install -m 644 build/v8_context_snapshot.bin /opt/jellyfin-desktop/",
-    "sudo install -m 755 build/libcef.so /opt/jellyfin-desktop/",
-    "sudo install -m 755 build/libmpv.so.2 /opt/jellyfin-desktop/",
-    "sudo install -m 755 build/libEGL.so /opt/jellyfin-desktop/",
-    "sudo install -m 755 build/libGLESv2.so /opt/jellyfin-desktop/",
-    "sudo install -m 755 build/libvk_swiftshader.so /opt/jellyfin-desktop/",
-    "sudo install -m 755 build/libvulkan.so.1 /opt/jellyfin-desktop/",
-    "sudo cp -a build/locales /opt/jellyfin-desktop/",
-    "sudo ln -sf /opt/jellyfin-desktop/jellyfin-desktop /usr/local/bin/jellyfin-desktop",
-    "sudo install -Dm644 resources/linux/org.jellyfin.JellyfinDesktop.desktop /usr/local/share/applications/org.jellyfin.JellyfinDesktop.desktop",
-    "sudo install -Dm644 resources/linux/org.jellyfin.JellyfinDesktop.metainfo.xml /usr/local/share/metainfo/org.jellyfin.JellyfinDesktop.metainfo.xml",
-    "sudo install -Dm644 resources/linux/org.jellyfin.JellyfinDesktop.svg /usr/local/share/icons/hicolor/scalable/apps/org.jellyfin.JellyfinDesktop.svg",
+    "sudo install -Dm755 build/src/jellyfin-desktop /usr/local/bin/jellyfin-desktop",
+    "sudo install -Dm644 source/resources/meta/org.jellyfin.JellyfinDesktop.desktop /usr/local/share/applications/org.jellyfin.JellyfinDesktop.desktop",
+    "sudo install -Dm644 source/resources/meta/org.jellyfin.JellyfinDesktop.appdata.xml /usr/local/share/metainfo/org.jellyfin.JellyfinDesktop.metainfo.xml",
+    "sudo install -Dm644 source/resources/images/icon.svg /usr/local/share/icons/hicolor/scalable/apps/org.jellyfin.JellyfinDesktop.svg",
     "sudo update-desktop-database",
 ]
 
@@ -56,7 +45,6 @@ run = [
 id = "remove"
 remove = true
 run = [
-    "sudo rm -rf /opt/jellyfin-desktop",
     "sudo rm /usr/local/bin/jellyfin-desktop",
     "sudo rm /usr/local/share/applications/org.jellyfin.JellyfinDesktop.desktop",
     "sudo rm /usr/local/share/metainfo/org.jellyfin.JellyfinDesktop.metainfo.xml",

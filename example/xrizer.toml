@@ -1,0 +1,32 @@
+id = "xrizer"
+name = "xrizer"
+description = "xrizer is a reimplementation of OpenVR on top of OpenXR. This enables you to run OpenVR games through any OpenXR runtime without running SteamVR."
+
+[[steps]]
+id = "clone"
+cache = ["source"]
+once = true
+run = "git clone --depth 1 --single-branch --branch $(package.version?:main) --recurse-submodules --shallow-submodules https://github.com/Supreeeme/xrizer.git source"
+
+[[default.steps]]
+id = "build"
+cache = ["target"]
+dir = "source"
+run = "cargo xbuild --release"
+
+[[default.steps]]
+id = "install"
+dir = "source"
+run = [
+    "sudo install -d /usr/local/lib64/xrizer/runtime/bin/linux64",
+    "sudo install -m 755 target/release/libxrizer.so /usr/local/lib64/",
+    "sudo ln -sf /usr/local/lib64/libxrizer.so /usr/local/lib64/xrizer/runtime/bin/linux64/vrclient.so",
+]
+
+[[default.steps]]
+id = "remove"
+remove = true
+run = [
+    "sudo rm -rf /usr/local/lib64/xrizer",
+    "sudo rm /usr/local/lib64/libxrizer.so",
+]
